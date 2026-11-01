@@ -1,0 +1,164 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.98.1"
+  SPIKES: >-
+    -p spike-gpu -p spike-wasmtime -p spike-mesher
+    -p spike-redb -p spike-circuit -p spike-quinn
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The full check from AGENTS.md: fmt, clippy, tests, cargo-deny.
+  verify:
+    name: verify (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-verify-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-verify-
+      - name: Cache cargo-deny
+        id: deny
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-0.20.2-${{ runner.os }}
+      - name: Install cargo-deny
+        if: steps.deny.outputs.cache-hit != 'true'
+        run: cargo install cargo-deny --locked --version 0.20.2
+      - run: cargo xtask verify
+
+  # Windows and macOS: does it compile warning-free, and do the tests pass?
+  # This says nothing about GPU behaviour; hosted runners have no real GPU.
+  test:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-test-
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # The test package for the people who own the other machines: a zip they unzip and run.
+  bundle:
+    name: test bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+          - { name: macos, os: macos-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-bundle-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-bundle-
+
+      - name: Build programs
+        if: matrix.name != 'macos'
+        run: cargo build --release $SPIKES
+
+      # One universal binary per program so the same download works on Apple silicon and Intel.
+      # Ad-hoc signed (no developer account), which is the most this project does on macOS.
+      - name: Build universal programs
+        if: matrix.name == 'macos'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin $SPIKES
+          cargo build --release --target x86_64-apple-darwin $SPIKES
+          mkdir -p target/universal
+          for p in spike-gpu spike-wasmtime spike-mesher spike-redb spike-circuit spike-quinn; do
+            lipo -create -output "target/universal/$p" \
+              "target/aarch64-apple-darwin/release/$p" "target/x86_64-apple-darwin/release/$p"
+            codesign --force --sign - "target/universal/$p"
+          done
+
+      - name: Make the bundle
+        if: matrix.name != 'macos'
+        run: cargo xtask bundle
+      - name: Make the bundle (macOS)
+        if: matrix.name == 'macos'
+        run: cargo xtask bundle --bin-dir target/universal --arch-label universal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxel-test-${{ matrix.name }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+      # Hosted runners have no real GPU, so this can fail or run on a software renderer. It is
+      # a smoke test of the program only. Its numbers say nothing about real hardware.
+      - name: Smoke-run the GPU program
+        continue-on-error: true
+        run: |
+          mkdir -p smoke
+          if [ "${{ matrix.name }}" = "macos" ]; then
+            bin="$PWD/target/aarch64-apple-darwin/release/spike-gpu"
+          else
+            bin="$PWD/target/release/spike-gpu"
+          fi
+          cd smoke && "$bin"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-smoke-${{ matrix.name }}
+          path: smoke/gpu-report.txt
+          if-no-files-found: ignore

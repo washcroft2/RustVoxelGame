@@ -1,8 +1,11 @@
 //! Project automation (plan section 12). Run through the `cargo xtask` alias.
 
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use anyhow::{Context, Result, bail};
+
+mod bundle;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -16,6 +19,18 @@ struct Cli {
 enum Task {
     /// Format, clippy (warnings denied), tests and cargo-deny.
     Verify,
+    /// Pack the built Phase 0 spike programs into a zip for another machine.
+    Bundle {
+        /// Directory holding the built programs.
+        #[arg(long, default_value = "target/release")]
+        bin_dir: PathBuf,
+        /// Where to write the zip.
+        #[arg(long, default_value = "dist")]
+        out_dir: PathBuf,
+        /// Architecture label for the zip name; defaults to this machine's.
+        #[arg(long)]
+        arch_label: Option<String>,
+    },
 }
 
 /// One named check inside `verify`: a program plus its arguments.
@@ -68,6 +83,21 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     match Cli::parse().command {
         Task::Verify => verify(),
+        Task::Bundle {
+            bin_dir,
+            out_dir,
+            arch_label,
+        } => {
+            let label = arch_label.unwrap_or_else(|| std::env::consts::ARCH.to_string());
+            let zip = bundle::build(&bundle::Spec {
+                bin_dir: &bin_dir,
+                out_dir: &out_dir,
+                os: std::env::consts::OS,
+                arch_label: &label,
+            })?;
+            eprintln!("wrote {}", zip.display());
+            Ok(())
+        }
     }
 }
 

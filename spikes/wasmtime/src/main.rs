@@ -4,24 +4,25 @@
 //! host-call overhead, host-to-guest call overhead, the cost of epoch checks,
 //! and how quickly epoch interruption stops a runaway guest.
 
-use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wasmtime::{Config, Engine, Linker, Module, Result, Store, Trap, TypedFunc};
 
+/// Prebuilt from `guest/guest.rs`; see the command in that file's header. Embedded so the
+/// program runs on machines without Rust installed.
+const GUEST: &[u8] = include_bytes!("../guest/guest.wasm");
+
 const HOST_CALLS: i32 = 100_000;
 const REPEATS: usize = 15;
 
 fn main() -> Result<()> {
-    let wasm = build_guest()?;
     println!(
         "os={} arch={} guest={} bytes",
         std::env::consts::OS,
         std::env::consts::ARCH,
-        std::fs::metadata(&wasm)?.len()
+        GUEST.len()
     );
 
     for epoch in [false, true] {
@@ -31,7 +32,7 @@ fn main() -> Result<()> {
         );
         let engine = engine(epoch)?;
         let t = Instant::now();
-        let module = Module::from_file(&engine, &wasm)?;
+        let module = Module::new(&engine, GUEST)?;
         println!("compile: {:?}", t.elapsed());
 
         let mut linker = Linker::new(&engine);
@@ -78,7 +79,7 @@ fn main() -> Result<()> {
         println!("pure guest loop, 200M iterations: {d:?}");
     }
 
-    interrupt_latency(&wasm)?;
+    interrupt_latency()?;
     Ok(())
 }
 
@@ -90,10 +91,10 @@ fn engine(epoch: bool) -> Result<Engine> {
 
 /// A ticker thread bumps the epoch every millisecond, the way the game would
 /// once per frame slice; the guest gets a deadline of one tick.
-fn interrupt_latency(wasm: &PathBuf) -> Result<()> {
+fn interrupt_latency() -> Result<()> {
     println!("\n== epoch interrupt latency (tick = 1 ms, deadline = 1 tick)");
     let engine = engine(true)?;
-    let module = Module::from_file(&engine, wasm)?;
+    let module = Module::new(&engine, GUEST)?;
     let mut linker = Linker::new(&engine);
     linker.func_wrap("env", "host_get_block", |_: i32, _: i32, _: i32| 0i32)?;
 
@@ -147,28 +148,4 @@ fn median(mut f: impl FnMut() -> Result<Duration>) -> Result<Duration> {
     let mut v = (0..REPEATS).map(|_| f()).collect::<Result<Vec<_>>>()?;
     v.sort();
     Ok(v[v.len() / 2])
-}
-
-fn build_guest() -> Result<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let out = root.join("../../target/spike-wasmtime");
-    std::fs::create_dir_all(&out)?;
-    let wasm = out.join("guest.wasm");
-    let status = Command::new("rustc")
-        .args(["--edition", "2024", "--target", "wasm32-unknown-unknown"])
-        .args([
-            "--crate-type",
-            "cdylib",
-            "-C",
-            "opt-level=3",
-            "-C",
-            "panic=abort",
-        ])
-        .args(["-C", "link-arg=--allow-undefined"])
-        .arg(root.join("guest/guest.rs"))
-        .arg("-o")
-        .arg(&wasm)
-        .status()?;
-    wasmtime::ensure!(status.success(), "rustc failed building the guest");
-    Ok(wasm)
 }

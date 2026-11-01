@@ -1,1 +1,5 @@
 /target
+/dist
+/gpu-report.txt
+/voxel-report.txt
+/voxel-redb-test

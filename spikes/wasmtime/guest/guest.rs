@@ -1,6 +1,15 @@
 //! Throwaway guest for the wasmtime spike. Built with plain `rustc` for
 //! wasm32-unknown-unknown, so no wasm toolchain crate is needed. The host
 //! import and exports stand in for a mod calling the game once per block.
+//!
+//! `guest.wasm` next to this file is the committed build output. Rebuild it from the
+//! repository root with:
+//!
+//! ```text
+//! rustc --edition 2024 --target wasm32-unknown-unknown --crate-type cdylib \
+//!   -C opt-level=3 -C panic=abort -C link-arg=--allow-undefined \
+//!   spikes/wasmtime/guest/guest.rs -o spikes/wasmtime/guest/guest.wasm
+//! ```
 #![no_std]
 
 unsafe extern "C" {

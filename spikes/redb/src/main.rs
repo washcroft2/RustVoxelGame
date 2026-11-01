@@ -28,7 +28,8 @@ fn main() {
             "noisy underground"
         }
     );
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/spike-redb");
+    // Under the current directory, not /tmp (which can be RAM-backed) and not a build path.
+    let dir = PathBuf::from("voxel-redb-test");
     fs::create_dir_all(&dir).expect("create output dir");
     let path = dir.join("world.redb");
     let _ = fs::remove_file(&path);
@@ -58,7 +59,7 @@ fn main() {
         .map(|r| with_dict_c.compress(r).expect("compress"))
         .collect();
 
-    println!("fs: {} (btrfs on this machine)", path.display());
+    println!("database: {}", path.display());
     println!(
         "chunks: {}  raw packed: {} MB",
         keys.len(),
@@ -117,11 +118,11 @@ fn main() {
     );
     let file = fs::metadata(&path).expect("stat").len() as usize;
     println!(
-        "file {} MB for {} MB of blobs ({:.2}x); disk written {} MB",
+        "file {} MB for {} MB of blobs ({:.2}x); disk written {}",
         file / 1_000_000,
         stored_bytes / 1_000_000,
         file as f64 / stored_bytes as f64,
-        (write_bytes() - io0) / 1_000_000
+        written_since(io0).map_or("n/a".to_string(), |b| format!("{} MB", b / 1_000_000))
     );
 
     // 2. Random point reads.
@@ -179,7 +180,7 @@ fn main() {
         times.push(t.elapsed());
     }
     times.sort();
-    let written = write_bytes() - io1;
+    let written = written_since(io1);
     let logical = rounds * per_round * (stored_bytes / blobs.len());
     println!("\n== autosave: {rounds} commits x {per_round} overwritten chunks");
     println!(
@@ -188,13 +189,19 @@ fn main() {
         times[times.len() * 99 / 100],
         times[times.len() - 1]
     );
-    println!(
-        "file grew {} MB; wrote {} MB to disk for ~{} MB of changed blobs ({:.1}x amplification)",
-        (fs::metadata(&path).expect("stat").len() - size_before) / 1_000_000,
-        written / 1_000_000,
-        logical / 1_000_000,
-        written as f64 / logical as f64
-    );
+    let grew = (fs::metadata(&path).expect("stat").len() - size_before) / 1_000_000;
+    match written {
+        Some(w) => println!(
+            "file grew {grew} MB; wrote {} MB to disk for ~{} MB of changed blobs ({:.1}x amplification)",
+            w / 1_000_000,
+            logical / 1_000_000,
+            w as f64 / logical as f64
+        ),
+        None => println!(
+            "file grew {grew} MB for ~{} MB of changed blobs (disk write counter unavailable on this OS)",
+            logical / 1_000_000
+        ),
+    }
 
     // 4. Compaction.
     let mut db = db;
@@ -215,6 +222,8 @@ fn main() {
         .len()
         .expect("len");
     assert_eq!(n as usize, keys.len(), "no chunks lost");
+    drop(db);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// Key: dimension u8, then x, y, z as big-endian i32 with the sign bit flipped
@@ -340,13 +349,14 @@ fn median_len(blobs: &[&Vec<u8>]) -> usize {
     v[v.len() / 2]
 }
 
-/// Bytes this process has asked the kernel to write (Linux `/proc/self/io`).
-fn write_bytes() -> usize {
+/// Bytes this process has asked the kernel to write (Linux `/proc/self/io`); `None` elsewhere.
+fn write_bytes() -> Option<usize> {
     fs::read_to_string("/proc/self/io")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("write_bytes: ")?.trim().parse().ok())
-        })
-        .unwrap_or(0)
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("write_bytes: ")?.trim().parse().ok())
+}
+
+fn written_since(before: Option<usize>) -> Option<usize> {
+    Some(write_bytes()?.saturating_sub(before?))
 }
