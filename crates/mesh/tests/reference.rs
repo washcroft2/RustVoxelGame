@@ -262,7 +262,7 @@ fn terrain(seed: u64) -> impl Fn([i32; 3]) -> u16 {
         let skin = if y == h - 1 { 1 } else { 4 };
         if y < h {
             skin
-        } else if y < h + 3 && hash(seed, x / 3, y, z / 3) % 7 == 0 {
+        } else if y < h + 3 && hash(seed, x / 3, y, z / 3).is_multiple_of(7) {
             3
         } else if (40..42).contains(&x) || (y == h + 4 && x < 6) {
             2
@@ -383,15 +383,7 @@ fn fixed_scenes_match_the_reference() {
     let reg = registry();
     for by_edits in [false, true] {
         check(&Scene::new(&reg, terrain(1), 0, by_edits), &reg);
-        check(
-            &Scene::new(
-                &reg,
-                terrain(2),
-                0b1010_0101_0010_1000_0100_1001_011,
-                by_edits,
-            ),
-            &reg,
-        );
+        check(&Scene::new(&reg, terrain(2), 0x0529_424B, by_edits), &reg);
         check(&Scene::new(&reg, boxes(7, 40), 0, by_edits), &reg);
         check(&Scene::new(&reg, noise(1, 50), 0, by_edits), &reg);
     }
