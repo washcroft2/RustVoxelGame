@@ -22,8 +22,6 @@ pub enum ContentError {
     DuplicateBlock(String),
     #[error("texture {texture} (used by {block}) is not in any loaded pack")]
     MissingTexture { block: String, texture: String },
-    #[error("expected exactly one air block, found {0}")]
-    AirCount(usize),
     #[error("more than {0} blocks")]
     TooManyBlocks(usize),
     #[error("more than {0} textures")]

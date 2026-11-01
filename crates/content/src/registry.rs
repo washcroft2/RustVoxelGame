@@ -6,6 +6,8 @@ use crate::pack::TextureSource;
 use crate::{ContentError, Pack};
 
 /// Block IDs are `u16`, so this is the most a registry can hold.
+/// The name the engine gives the empty block.
+const AIR_NAME: &str = "base:air";
 const MAX_BLOCKS: usize = u16::MAX as usize;
 /// Quads carry a 16-bit material.
 const MAX_TEXTURES: usize = u16::MAX as usize;
@@ -36,7 +38,8 @@ pub struct BlockDef {
 
 /// Blocks and textures from every loaded pack, with runtime IDs assigned.
 ///
-/// Air is always [`BlockId::AIR`]; other blocks follow in pack order, then path order.
+/// Air is built into the engine as `base:air` with [`BlockId::AIR`]; packs can't define it.
+/// Other blocks follow in pack order, then path order.
 #[derive(Debug)]
 pub struct Registry {
     blocks: Vec<BlockDef>,
@@ -60,8 +63,12 @@ impl Registry {
             }
         }
 
-        let mut blocks = Vec::new();
-        let mut air = Vec::new();
+        let mut blocks = vec![BlockDef {
+            name: Identifier::new(AIR_NAME).expect("AIR_NAME is a valid identifier"),
+            layer: RenderLayer::Opaque,
+            opaque: false,
+            faces: None,
+        }];
         for pack in packs {
             for (path, src) in &pack.blocks {
                 let file = format!("{}/blocks/{path}.toml", pack.manifest.id);
@@ -77,44 +84,16 @@ impl Registry {
                         });
                     }
                 };
-                let faces = if src.air {
-                    if src.textures.is_some() {
-                        return Err(ContentError::Invalid {
-                            path: file,
-                            message: "air has no textures".into(),
-                        });
-                    }
-                    None
-                } else {
-                    let t = src.textures.as_ref().ok_or_else(|| ContentError::Invalid {
-                        path: file.clone(),
-                        message: "missing [textures]".into(),
-                    })?;
-                    Some(resolve_faces(
-                        t,
-                        &pack.manifest.id,
-                        &name,
-                        &file,
-                        &texture_ids,
-                    )?)
-                };
-                let def = BlockDef {
+                let faces =
+                    resolve_faces(&src.textures, &pack.manifest.id, &name, &file, &texture_ids)?;
+                blocks.push(BlockDef {
                     name,
                     layer,
-                    opaque: !src.air && layer == RenderLayer::Opaque,
-                    faces,
-                };
-                if src.air {
-                    air.push(def);
-                } else {
-                    blocks.push(def);
-                }
+                    opaque: layer == RenderLayer::Opaque,
+                    faces: Some(faces),
+                });
             }
         }
-        if air.len() != 1 {
-            return Err(ContentError::AirCount(air.len()));
-        }
-        blocks.splice(0..0, air);
         if blocks.len() > MAX_BLOCKS {
             return Err(ContentError::TooManyBlocks(MAX_BLOCKS));
         }

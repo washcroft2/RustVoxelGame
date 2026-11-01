@@ -49,7 +49,6 @@ fn ids_are_stable_for_the_same_input() {
             &[
                 ("b", "[textures]\nall = \"x\"\n"),
                 ("a", "[textures]\nall = \"x\"\n"),
-                ("air", "air = true\n"),
             ],
             &["x"],
         )
@@ -65,13 +64,13 @@ fn ids_are_stable_for_the_same_input() {
             .map(|b| b.name.to_string())
             .collect::<Vec<_>>()
     };
-    assert_eq!(names(&r1), ["t:air", "t:a", "t:b"]);
+    assert_eq!(names(&r1), ["base:air", "t:a", "t:b"]);
     assert_eq!(names(&r1), names(&r2));
 }
 
 #[test]
 fn a_second_pack_can_use_the_first_packs_textures() {
-    let a = pack("a", &[("air", "air = true\n")], &["rock"]).unwrap();
+    let a = pack("a", &[], &["rock"]).unwrap();
     let b = pack("b", &[("slab", "[textures]\nall = \"a:rock\"\n")], &[]).unwrap();
     let reg = Registry::build(&[a, b]).unwrap();
     let slab = reg.block_id(&id("b:slab")).unwrap();
@@ -87,54 +86,60 @@ fn fails(blocks: &[(&str, &str)], textures: &[&str]) -> ContentError {
 
 #[test]
 fn bad_packs_are_errors_naming_the_problem() {
-    let air = ("air", "air = true\n");
     let ok = ("s", "[textures]\nall = \"x\"\n");
-
-    assert!(matches!(fails(&[ok], &["x"]), ContentError::AirCount(0)));
     assert!(matches!(
-        fails(&[air, ("air2", "air = true\n")], &[]),
-        ContentError::AirCount(2)
-    ));
-    assert!(matches!(
-        fails(&[air, ("s", "[textures]\nall = \"nope\"\n")], &["x"]),
+        fails(&[("s", "[textures]\nall = \"nope\"\n")], &["x"]),
         ContentError::MissingTexture { .. }
     ));
     assert!(matches!(
         fails(
-            &[air, ("s", "layer = \"weird\"\n[textures]\nall = \"x\"\n")],
+            &[("s", "layer = \"weird\"\n[textures]\nall = \"x\"\n")],
             &["x"]
         ),
         ContentError::Invalid { .. }
     ));
     assert!(matches!(
-        fails(&[air, ("s", "")], &["x"]),
+        fails(&[("s", "[textures]\ntop = \"x\"\n")], &["x"]),
         ContentError::Invalid { .. }
     ));
     assert!(matches!(
-        fails(&[air, ("s", "[textures]\ntop = \"x\"\n")], &["x"]),
-        ContentError::Invalid { .. }
-    ));
-    assert!(matches!(
-        fails(&[air, ("s", "colour = 3\n")], &[]),
+        fails(&[("s", "")], &["x"]),
         ContentError::Parse { .. }
     ));
     assert!(matches!(
-        fails(&[air, ("S", "air = false\n")], &[]),
+        fails(&[("s", "colour = 3\n")], &[]),
+        ContentError::Parse { .. }
+    ));
+    assert!(matches!(
+        fails(&[("S", "[textures]\nall = \"x\"\n")], &["x"]),
         ContentError::Name { .. }
     ));
     assert!(matches!(
-        fails(&[("a", "air = true\n[textures]\nall = \"x\"\n")], &["x"]),
-        ContentError::Invalid { .. }
+        fails(&[ok, ok], &["x"]),
+        ContentError::DuplicateBlock(_)
     ));
     let big = format!("# {}\n[textures]\nall = \"x\"\n", "x".repeat(70_000));
     assert!(matches!(
-        fails(&[air, ("s", &big)], &["x"]),
+        fails(&[("s", &big)], &["x"]),
         ContentError::TooLarge { .. }
     ));
 }
 
 #[test]
-fn bad_manifests_and_duplicates_are_errors() {
+fn packs_cannot_redefine_air() {
+    let p = Pack::from_parts(
+        "id = \"base\"\nversion = \"1\"\n",
+        &[("air".to_string(), "[textures]\nall = \"x\"\n".to_string())],
+        vec!["x".to_string()],
+    )
+    .unwrap();
+    assert!(
+        matches!(Registry::build(&[p]), Err(ContentError::DuplicateBlock(n)) if n == "base:air")
+    );
+}
+
+#[test]
+fn bad_manifests_and_duplicate_packs_are_errors() {
     assert!(matches!(
         Pack::from_parts("id = \"Bad Id\"\nversion = \"1\"\n", &[], vec![]),
         Err(ContentError::Name { .. })
@@ -143,17 +148,7 @@ fn bad_manifests_and_duplicates_are_errors() {
         Pack::from_parts("version = \"1\"\n", &[], vec![]),
         Err(ContentError::Parse { .. })
     ));
-    let air = pack("t", &[("air", "air = true\n")], &[]).unwrap();
-    assert!(matches!(
-        Registry::build(&[air.clone(), air]),
-        Err(ContentError::AirCount(2))
-    ));
-    let a = pack(
-        "t",
-        &[("air", "air = true\n"), ("s", "[textures]\nall = \"x\"\n")],
-        &["x"],
-    )
-    .unwrap();
+    let a = pack("t", &[("s", "[textures]\nall = \"x\"\n")], &["x"]).unwrap();
     let b = pack("t", &[("s", "[textures]\nall = \"x\"\n")], &["x"]).unwrap();
     assert!(matches!(
         Registry::build(&[a, b]),

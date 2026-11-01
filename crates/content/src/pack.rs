@@ -22,14 +22,10 @@ pub struct PackManifest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlockSource {
-    /// Marks the empty block. Exactly one loaded block must set it.
-    #[serde(default)]
-    pub air: bool,
     /// `opaque`, `cutout` or `translucent`.
     #[serde(default = "default_layer")]
     pub layer: String,
-    #[serde(default)]
-    pub textures: Option<TextureSource>,
+    pub textures: TextureSource,
 }
 
 fn default_layer() -> String {
