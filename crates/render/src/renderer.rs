@@ -721,6 +721,12 @@ impl Renderer {
         Ok(stats)
     }
 
+    /// Blocks until the GPU has finished everything submitted so far. For benchmarks and
+    /// screenshots; normal frames never wait.
+    pub fn wait_idle(&self) {
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     /// Copies the last frame of a headless renderer to the CPU as tightly packed RGBA8
     /// (sRGB-encoded), `width * height * 4` bytes.
     pub fn read_pixels(&self) -> Result<Vec<u8>, RenderError> {

@@ -1,6 +1,7 @@
 # Checked by `cargo xtask verify`. Plan section 16 lists two unmaintained-crate
 # notices (ttf-parser, atomic-polyfill) to record as explicit exceptions under
-# [advisories] ignore when those dependencies are first added.
+# [advisories] ignore when those dependencies are first added. ttf-parser is
+# recorded below; atomic-polyfill comes with postcard, which isn't used yet.
 
 [graph]
 # The game's build targets. Dependencies that exist only on other platforms are ignored.
@@ -13,6 +14,11 @@ targets = [
 
 [advisories]
 version = 2
+ignore = [
+    # Plan section 16: reached only through winit's Linux window decorations
+    # (sctk-adwaita -> ab_glyph), and the game loads only fonts it ships.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained; only winit's Linux decorations use it" },
+]
 
 [licenses]
 version = 2
