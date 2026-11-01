@@ -18,6 +18,8 @@ pub enum ContentError {
     TooLarge { path: String, limit: usize },
     #[error("{path}: {message}")]
     Invalid { path: String, message: String },
+    #[error("texture {texture}: {message}")]
+    Texture { texture: String, message: String },
     #[error("duplicate block {0}")]
     DuplicateBlock(String),
     #[error("texture {texture} (used by {block}) is not in any loaded pack")]

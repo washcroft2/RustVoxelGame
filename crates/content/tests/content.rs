@@ -163,3 +163,35 @@ fn missing_pack_directory_is_an_io_error() {
         Err(ContentError::Io { .. })
     ));
 }
+
+#[test]
+fn base_textures_decode_to_one_size() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packs/base");
+    let pack = Pack::read_dir(&dir).unwrap();
+    let reg = Registry::build(std::slice::from_ref(&pack)).unwrap();
+    let images = voxel_content::load_texture_images(&reg, &[pack]).unwrap();
+    assert_eq!(images.len(), reg.textures().len());
+    assert!(images.iter().all(|i| (i.width, i.height) == (16, 16)));
+    assert!(images.iter().all(|i| i.rgba.len() == 16 * 16 * 4));
+    // stone is a flat grey square
+    let stone = reg
+        .textures()
+        .iter()
+        .position(|t| t.as_str() == "base:stone")
+        .unwrap();
+    assert_eq!(&images[stone].rgba[..4], &[125, 125, 125, 255]);
+}
+
+#[test]
+fn texture_loading_reports_unreadable_packs() {
+    let in_memory = pack("t", &[("s", "[textures]\nall = \"x\"\n")], &["x"]).unwrap();
+    let reg = Registry::build(std::slice::from_ref(&in_memory)).unwrap();
+    assert!(matches!(
+        voxel_content::load_texture_images(&reg, &[in_memory]),
+        Err(ContentError::Texture { .. })
+    ));
+    assert!(matches!(
+        voxel_content::load_texture_images(&reg, &[]),
+        Err(ContentError::Texture { .. })
+    ));
+}

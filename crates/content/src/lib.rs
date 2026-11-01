@@ -8,7 +8,9 @@
 mod error;
 mod pack;
 mod registry;
+mod textures;
 
 pub use error::ContentError;
 pub use pack::{BlockSource, Pack, PackManifest};
 pub use registry::{BlockDef, Registry, RenderLayer, TextureId};
+pub use textures::{TextureImage, load_texture_images};

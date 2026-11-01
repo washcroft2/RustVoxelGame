@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use voxel_core::Identifier;
@@ -56,6 +56,8 @@ pub struct Pack {
     pub blocks: Vec<(String, BlockSource)>,
     /// Texture paths without the `.png` extension, sorted.
     pub textures: Vec<String>,
+    /// Where the pack was read from; `None` for packs built in memory.
+    pub root: Option<PathBuf>,
 }
 
 impl Pack {
@@ -89,6 +91,7 @@ impl Pack {
             manifest,
             blocks: parsed,
             textures,
+            root: None,
         })
     }
 
@@ -103,7 +106,9 @@ impl Pack {
             ));
         }
         let textures = list(&dir.join("textures"), "png")?;
-        Self::from_parts(&manifest, &blocks, textures)
+        let mut pack = Self::from_parts(&manifest, &blocks, textures)?;
+        pack.root = Some(dir.to_path_buf());
+        Ok(pack)
     }
 }
 
