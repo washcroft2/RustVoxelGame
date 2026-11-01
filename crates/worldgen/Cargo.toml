@@ -1,0 +1,18 @@
+[package]
+name = "voxel-worldgen"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror = "=2.0.21"
+voxel-content = { path = "../content", version = "0.0.0" }
+voxel-core = { path = "../core", version = "0.0.0" }
+voxel-world = { path = "../world", version = "0.0.0" }
+
+[dev-dependencies]
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

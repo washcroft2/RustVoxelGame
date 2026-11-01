@@ -2012,6 +2012,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "voxel-worldgen"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "thiserror",
+ "voxel-content",
+ "voxel-core",
+ "voxel-world",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
