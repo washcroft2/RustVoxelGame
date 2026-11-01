@@ -86,8 +86,11 @@ pub fn build(spec: &Spec) -> Result<PathBuf> {
         .out_dir
         .join(format!("voxel-test-{}-{}.zip", spec.os, spec.arch_label));
     let mut zip = ZipWriter::new(File::create(&zip_path)?);
+    // Record Unix attributes whatever host builds the zip. Left to default, a Windows host
+    // writes DOS attributes and the executable bits are lost for Unix readers.
     let plain = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
+        .system(zip::System::Unix)
         .unix_permissions(0o644);
     let exec = plain.unix_permissions(0o755);
 
