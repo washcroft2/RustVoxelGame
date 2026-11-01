@@ -63,7 +63,7 @@ The real machines that will play the game replace these placeholder specs in Pha
 | Frame rate, B | ≥60 fps at native 1080p-equivalent, 24-chunk radius |
 | Frame rate, C | ≥60 fps at 1080p, 12-chunk radius |
 | Frame time p99 | ≤1.5× the median; no chunk-streaming hitches |
-| Remesh, 32³ cube-only chunk | ≤100 µs median per core |
+| Remesh, typical surface chunk, cubes only (re-measure on real terrain in Phase 1) | ≤100 µs median per core |
 | Block edit to visible (local) | ≤2 frames |
 | Terrain generation | ≥2,000 chunks/s on 8 cores |
 | Client memory | ≤4 GB RAM, ≤2 GB VRAM at the A settings |
@@ -454,6 +454,12 @@ The goal is Redstone's depth (clocks, logic, memory, piston doors, item sorters)
 
 **Differences from Minecraft:** direction-dependent update order, quasi-connectivity and zero-tick tricks don't exist, so Minecraft builds relying on them won't work. Most ordinary repeater and logic designs should carry over, since timing also runs at 10 Hz. The Phase 0 prototype and Phase 6 golden circuits test this.
 
+**Open questions (from the Phase 0 prototype):**
+
+- How wire connects vertically. The prototype joined wire in all six directions, so stacked wire merges. Minecraft uses step-up and step-down rules instead. Decide when it can be played with, in Phase 6.
+- Solid blocks carrying power (above) and component outputs between 0 and 15, which comparators need, are not yet prototyped. The prototype used on/off outputs only.
+- Whether the rules feel right to players is untested and can only be judged by building with them.
+
 **Expansion:** components are archetypes with data parameters, so new gates or signal types can be added as data where an archetype fits. Scripts can't run inside the solver.
 
 **Testing**
@@ -581,7 +587,7 @@ A panic means the game state can't be trusted, so there's no emergency save. Tra
 
 ### CI and delivery
 
-- **CI:** self-hosted runners on the Linux and Windows PCs, covering real-GPU Vulkan and DX12 performance. Hosted macOS runners cover builds and tests only, since they can't measure GPU performance. Hosted macOS minutes can be costly on private repositories, so run them daily and at gates, not on every commit, and check current pricing first.
+- **CI:** GitHub-hosted runners for Linux, Windows and macOS build, lint and test every push. The repository is public, so hosted minutes are free. Hosted runners have no real GPU (Windows uses a software renderer, macOS a virtual one), so they check correctness and that the programs run, not performance. Real-GPU performance checks run locally on the Linux PC with `cargo xtask perf`. Real Windows and Mac hardware is checked with the test bundles at phase gates. No family machine needs Rust installed.
 - **MacBook testing:** it's a family member's laptop, so it isn't a CI runner. `cargo xtask bundle` creates a package that its owner opens to run the scenarios and produce a report to send back. It runs at phase gates only, so Metal problems can stay hidden between gates.
 - **Headless GPU tests** use lavapipe or WARP.
 - **Packaging:** plain archives or an AppImage for Linux, a zip for Windows, an ad-hoc-signed universal `.app` for macOS (runs on Apple silicon and Intel, so the MacBook model doesn't need to be known), and the dedicated server binary. Without paid signing, macOS and Windows show a security warning on first launch, so include short instructions.
@@ -626,7 +632,7 @@ Feel has to be made measurable where possible. Track prediction correction size,
 
 ### What needs a human
 
-- **Real hardware.** Set up the Windows PC as a runner from Phase 0. Linux can't validate Metal or DX12, and a software rasteriser says nothing about performance.
+- **Real hardware.** Linux can't validate Metal or DX12, and a software rasteriser says nothing about performance. The Windows PC's owner runs the test bundle at phase gates, as the MacBook's owner does.
 - **The MacBook owner** runs the test bundle remotely at phase gates, when convenient. A late report doesn't hold up work on other platforms, but that gate stays open for macOS until the report arrives.
 - **Family playtests** at the Phase 2, 4, 5, 6 and 7 gates for movement feel, latency and fun. Agents can't judge these.
 - **Art direction and final asset choices.** Agents can collect and normalise free assets and write models, but a person decides what looks right.
@@ -649,7 +655,7 @@ Throwaway code answering the questions that could change the architecture.
 - Confirm wgpu's actual Metal and DX12 feature status on real hardware.
 - Run an ad-hoc-signed build on the MacBook, including wasmtime and a test of first launch and self-update, and measure host-call overhead and epoch interruption inside a frame. This is the one spike that needs the remote owner's time, so it shouldn't block the others.
 - Prototype the circuit solver against the section 2 target, including net rebuilds during edits.
-- Set up `xtask`, the Linux and Windows runners, hosted macOS builds and the MacBook test bundle.
+- Set up `xtask`, hosted CI for all three systems, and the test bundles for the Windows PC and the MacBook.
 - Record the actual specs of every machine that will play, and replace the reference hardware in section 2.
 
 **Gate:** written results, with each decision in section 1 confirmed or revised. Targets adjusted to measured data.
@@ -808,3 +814,4 @@ Not verified, to be settled in Phase 0:
 
 1. **Which MacBook is it?** This isn't blocking, since universal builds run on either chip type. The answer only affects the macOS performance targets, and the first test bundle report will reveal it.
 2. **What are the expansion ideas?** Needed by Phase 9. It helps to know any big ones sooner, since a few may need engine support earlier.
+3. **How should wire connect vertically?** See the circuit open questions in section 8. Needed by Phase 6.

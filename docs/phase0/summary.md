@@ -16,7 +16,7 @@ only run on GitHub's hosted virtual machines (`hosted-runners.md`), not on famil
 | MDI + `first_instance` | Real GPU: Vulkan only | Correct on Vulkan (real GPU), Metal (VM) and DX12 (software). Metal MDI costs ~1.5x direct draws to record (`gpu.md`, `hosted-runners.md`) |
 | wgpu feature status | Real GPU: Vulkan only | RTX 2060 Super has everything. Metal VM lacks count draws and timestamps, as the plan expected (`hosted-runners.md`) |
 | wasmtime on the MacBook | Works on Apple silicon VM | Host calls 2–5 ns, JIT and epoch interrupt work on Linux, Windows and an M1 VM. First-launch and self-update on the real MacBook untested (`wasmtime.md`, `hosted-runners.md`) |
-| CI, macOS builds, test bundles | Done, untested on people's machines | GitHub Actions builds and tests all three OSes; bundles for each run end to end on hosted machines. Self-hosted Windows/Linux runners not set up (`hosted-runners.md`) |
+| CI, macOS builds, test bundles | Done, untested on people's machines | GitHub Actions builds and tests all three OSes; bundles for each run end to end on hosted machines. Self-hosted runners dropped (decision 0004) (`hosted-runners.md`) |
 | Machine specs | One of N | `machines.md` |
 
 ## Findings that touch the plan
@@ -39,6 +39,23 @@ These are for you to weigh at the gate. I have not changed the plan, targets or 
 
 None of these contradicts a decision in section 1 so far, but the section 1 decisions are
 unconfirmed until runs on real Windows and Mac hardware are in.
+
+## Decisions made at the gate
+
+Recorded in `docs/decisions/`; the plan is edited to match.
+
+- **0001** Use BBR congestion control in quinn, with server-side pacing.
+- **0002** The 100 µs remesh target applies to a typical surface chunk; number unchanged, to be
+  re-measured on real terrain in Phase 1.
+- **0003** Vertical wire connectivity is an open question until Phase 6.
+- **0004** Hosted CI for all three systems; no self-hosted runners.
+- **Not recorded as decisions:** quads per surface chunk (note only), and the T-junction fix
+  (enlarge quads by about one pixel, as the reference mesher does; depth hole-filling stays an
+  option for later and is independent of the rest of the game).
+
+Still open, deliberately carried: real DX12 and Metal hardware, first launch of unsigned
+downloads, self-update, the remaining machine specs, `xtask perf` and its baselines (Phase 1),
+and the dependency-rule and fuzz steps of `verify` (Phase 1).
 
 ## What I need from other people or machines
 
