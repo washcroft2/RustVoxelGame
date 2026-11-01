@@ -1238,6 +1238,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spike-circuit"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "spike-mesher"
 version = "0.0.0"
 dependencies = [
