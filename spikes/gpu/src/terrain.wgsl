@@ -23,18 +23,22 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) dir: u32) -> VOut
     var p = vec3<f32>(f32(w0 & 63u), f32((w0 >> 6u) & 63u), f32((w0 >> 12u) & 63u));
     let w = f32((w0 >> 18u) & 63u);
     let h = f32((w0 >> 24u) & 63u);
-    var tu = array<u32, 3>(1u, 2u, 0u);
-    var tv = array<u32, 3>(2u, 0u, 1u);
     let axis = dir / 2u;
+    // Unit vectors for the face normal and the two tangents, built with comparisons.
+    // Not `p[axis] += ...`: DX12's shader compiler rejects writes through a runtime index.
+    // Tangents: X -> (Y, Z), Y -> (Z, X), Z -> (X, Y).
+    let n = vec3<f32>(f32(axis == 0u), f32(axis == 1u), f32(axis == 2u));
+    let tu = vec3<f32>(f32(axis == 2u), f32(axis == 0u), f32(axis == 1u));
+    let tv = vec3<f32>(f32(axis == 1u), f32(axis == 2u), f32(axis == 0u));
     if (dir % 2u) == 0u {
-        p[axis] += 1.0; // positive faces sit on the voxel's far side
+        p += n; // positive faces sit on the voxel's far side
     }
     let cu = select(0.0, 1.0, k == 1u || k == 4u || k == 5u);
     let cv = select(0.0, 1.0, k == 2u || k == 3u || k == 5u);
     // Push each corner outward along both tangents by eps (0 disables).
     let e = g.eps.x;
-    p[tu[axis]] += cu * w + select(-e, e, cu == 1.0);
-    p[tv[axis]] += cv * h + select(-e, e, cv == 1.0);
+    p += tu * (cu * w + select(-e, e, cu == 1.0));
+    p += tv * (cv * h + select(-e, e, cv == 1.0));
     let m = w1 & 0xffffu;
     var out: VOut;
     out.pos = g.view_proj * vec4(p, 1.0);

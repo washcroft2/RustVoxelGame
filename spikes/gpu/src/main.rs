@@ -109,8 +109,18 @@ async fn run(out: &mut String) -> Result<()> {
         .await
         .context("request_device")?;
 
-    indirect_test(&device, &queue, has_first_instance, out)?;
-    pinhole_test(&device, &queue, out)?;
+    // Each section reports its own failure and the next still runs, so a problem on one
+    // platform doesn't hide the other results.
+    let mut failures = 0;
+    if let Err(e) = indirect_test(&device, &queue, has_first_instance, out) {
+        writeln!(out, "FAILED (vertex pulling test): {e:#}")?;
+        failures += 1;
+    }
+    if let Err(e) = pinhole_test(&device, &queue, out) {
+        writeln!(out, "FAILED (pinhole test): {e:#}")?;
+        failures += 1;
+    }
+    ensure!(failures == 0, "{failures} section(s) failed; see above");
     Ok(())
 }
 
@@ -266,7 +276,7 @@ fn indirect_test(
             },
         ],
     });
-    let pipeline = make_pipeline(device, &bgl, INDIRECT_SHADER, false);
+    let pipeline = make_pipeline(device, &bgl, INDIRECT_SHADER, false)?;
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
@@ -434,7 +444,7 @@ fn pinhole_test(device: &wgpu::Device, queue: &wgpu::Queue, out: &mut String) ->
             },
         ],
     });
-    let pipeline = make_pipeline(device, &bgl, TERRAIN_SHADER, true);
+    let pipeline = make_pipeline(device, &bgl, TERRAIN_SHADER, true)?;
     let color = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
@@ -611,7 +621,9 @@ fn make_pipeline(
     bgl: &wgpu::BindGroupLayout,
     wgsl: &str,
     depth: bool,
-) -> wgpu::RenderPipeline {
+) -> Result<wgpu::RenderPipeline> {
+    // wgpu panics on validation errors by default; catch them so they reach the report.
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(wgsl.into()),
@@ -621,7 +633,7 @@ fn make_pipeline(
         bind_group_layouts: &[Some(bgl)],
         immediate_size: 0,
     });
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
@@ -650,7 +662,11 @@ fn make_pipeline(
         }),
         multiview_mask: None,
         cache: None,
-    })
+    });
+    if let Some(err) = pollster::block_on(scope.pop()) {
+        anyhow::bail!("pipeline creation failed: {err}");
+    }
+    Ok(pipeline)
 }
 
 /// Copies an Rgba8 texture to the CPU. `width * 4` must be a multiple of 256.
