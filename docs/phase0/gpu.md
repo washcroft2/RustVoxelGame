@@ -5,7 +5,9 @@ writes it to `gpu-report.txt` in the current directory, so the same program can 
 and given to the Windows and macOS owners (see "Still to do"). wgpu 30.0.1 with the `vulkan`,
 `metal` and `dx12` backends compiled in, glam 0.34.2, bytemuck, pollster.
 
-**Only Vulkan on one NVIDIA GPU was tested.** Nothing here says anything about DX12 or Metal.
+**The numbers on this page are from Vulkan on one NVIDIA GPU.** DX12 (software) and Metal (virtual
+M1) results from GitHub's hosted runners are in `hosted-runners.md`: correctness held on both.
+Real Windows and Mac hardware has not been tested.
 
 ## Adapter (this machine)
 
@@ -67,8 +69,8 @@ Reading:
 
 ## Still to do
 
-- Run the program on the Windows PC (DX12 or Vulkan) and the MacBook (Metal) and read their
-  `gpu-report.txt`: first_vertex and first_instance correctness, the three draw modes' costs
+- Run the program on the real Windows PC and the MacBook (via the bundle) and read their
+  reports: first_vertex and first_instance correctness, the three draw modes' costs
   (especially Metal's MDI), which features are supported, and the pinhole counts.
 - A distance-scaled expansion and a close-up test for material-boundary bleed.
 - GPU-side timing. Only CPU record and submit-plus-wait wall time were measured.

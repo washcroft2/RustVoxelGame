@@ -22,5 +22,5 @@ echo Running %1 ...
 echo.>> %REPORT%
 echo === %1 ===>> %REPORT%
 %1.exe >> %REPORT% 2>&1
-echo exit code: %ERRORLEVEL%>> %REPORT%
+>> %REPORT% echo exit code: %ERRORLEVEL%
 exit /b 0

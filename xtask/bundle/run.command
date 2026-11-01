@@ -36,4 +36,4 @@ done
 echo
 echo "Done. Please send the file voxel-report.txt from this folder to whoever sent you this."
 echo
-read -r -p "Press Enter to close this window. " _
+read -r -p "Press Enter to close this window. " _ || true

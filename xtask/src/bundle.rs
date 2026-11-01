@@ -267,6 +267,23 @@ mod tests {
     }
 
     #[test]
+    fn windows_script_has_no_digit_before_a_redirect() {
+        // In batch, `echo exit code: 0>> file` treats `0>>` as "redirect handle 0", so the line
+        // never reaches the file. Found by running run.bat on a real Windows machine.
+        let body = script_for("windows").expect("script").body;
+        for line in body.lines() {
+            let before_redirect = line.split(">>").next().unwrap_or("");
+            if line.contains(">>") {
+                assert!(
+                    !before_redirect.ends_with(|c: char| c.is_ascii_digit() || c == '%'),
+                    "digit or variable directly before >>: {line}"
+                );
+            }
+        }
+        assert!(body.contains(">> %REPORT% echo exit code: %ERRORLEVEL%"));
+    }
+
+    #[test]
     fn every_script_runs_every_program() {
         for os in ["windows", "macos", "linux"] {
             let script = script_for(os).expect("script");

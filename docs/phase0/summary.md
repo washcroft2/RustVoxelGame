@@ -1,8 +1,8 @@
 # Phase 0 summary
 
 State at the end of the Linux-side work. Detail is in the per-spike files in this directory.
-Everything below was measured on one Linux machine (see `machines.md`). Nothing has run on
-Windows or macOS.
+Most numbers were measured on one Linux machine (see `machines.md`). Windows and macOS have
+only run on GitHub's hosted virtual machines (`hosted-runners.md`), not on family hardware.
 
 ## Spikes
 
@@ -13,10 +13,10 @@ Windows or macOS.
 | quinn datagrams vs bulk | Done on Linux | Pacing bulk to half the link keeps datagrams near the latency floor. Cubic gets ~0.8 Mbit/s at 2% loss (`quinn.md`) |
 | redb with chunk blobs | Done on Linux | Fast; autosave commits tens of ms. btrfs only, synthetic blobs (`redb.md`) |
 | Circuit solver | Done on Linux | 100k components at 10% switching: ~1.1 ms vs 5 ms target. Whether the rules feel right is untested (`circuits.md`) |
-| MDI + `first_instance` | Vulkan only | Correct and cheap on Vulkan. DX12 and Metal untested (`gpu.md`) |
-| wgpu feature status | Vulkan only | All features present on the RTX 2060 Super. DX12 and Metal untested (`gpu.md`) |
-| wasmtime on the MacBook | Linux half done | Host calls ~5 ns, epoch interrupt works to ~1 ms. Mac untested (`wasmtime.md`) |
-| Linux and Windows runners, macOS builds, MacBook bundle | Not started | Needs your decisions; see below |
+| MDI + `first_instance` | Real GPU: Vulkan only | Correct on Vulkan (real GPU), Metal (VM) and DX12 (software). Metal MDI costs ~1.5x direct draws to record (`gpu.md`, `hosted-runners.md`) |
+| wgpu feature status | Real GPU: Vulkan only | RTX 2060 Super has everything. Metal VM lacks count draws and timestamps, as the plan expected (`hosted-runners.md`) |
+| wasmtime on the MacBook | Works on Apple silicon VM | Host calls 2–5 ns, JIT and epoch interrupt work on Linux, Windows and an M1 VM. First-launch and self-update on the real MacBook untested (`wasmtime.md`, `hosted-runners.md`) |
+| CI, macOS builds, test bundles | Done, untested on people's machines | GitHub Actions builds and tests all three OSes; bundles for each run end to end on hosted machines. Self-hosted Windows/Linux runners not set up (`hosted-runners.md`) |
 | Machine specs | One of N | `machines.md` |
 
 ## Findings that touch the plan
@@ -38,15 +38,14 @@ These are for you to weigh at the gate. I have not changed the plan, targets or 
 6. **Compression and wire-size targets can't be judged yet**; they need real terrain.
 
 None of these contradicts a decision in section 1 so far, but the section 1 decisions are
-unconfirmed until the Windows and macOS runs are in.
+unconfirmed until runs on real Windows and Mac hardware are in.
 
 ## What I need from other people or machines
 
-- **Windows PC:** run the prebuilt `spike-gpu` and the other spike programs; send back the output
-  files. No installs for the user, if the build comes from CI.
-- **MacBook owner:** open a bundle and send back its report. Someone still has to build that
-  bundle on a Mac, which means hosted macOS CI.
-- **A GitHub repository** (public is fine) so CI can build Windows and macOS packages.
+- **Windows PC:** download the Windows bundle from the latest CI run, unzip it, double-click
+  `run.bat`, and send back `voxel-report.txt`. No installs.
+- **MacBook owner:** download the macOS bundle, unzip it, right-click `run.command` and choose
+  Open, and send back `voxel-report.txt`. How macOS reacts is part of what is being tested.
 - **Machine specs** for every machine that will play.
 - **Your call on the findings above**, especially 1 and 2.
 
@@ -56,3 +55,5 @@ unconfirmed until the Windows and macOS runs are in.
   mesher and circuit spikes are slow (~45 s and ~65 s). They are throwaway; I have not changed
   them.
 - Spike crates live under `spikes/` as workspace members. Delete or promote them at the gate.
+- CI uses `actions/checkout@v4`, `cache@v4` and `upload-artifact@v4`, which GitHub says target a
+  deprecated Node version and will need bumping.

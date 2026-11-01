@@ -1,0 +1,166 @@
+Voxel game test report
+
+=== Computer ===
+
+
+Caption                : Microsoft Windows Server 2025 Datacenter
+Version                : 10.0.26100
+TotalVisibleMemorySize : 16771836
+
+
+
+
+
+Name                      : Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+NumberOfCores             : 2
+NumberOfLogicalProcessors : 4
+
+
+
+
+
+Name                        : Microsoft Hyper-V Video
+DriverVersion               : 10.0.26100.1150
+CurrentHorizontalResolution : 1024
+CurrentVerticalResolution   : 768
+CurrentRefreshRate          : 1
+
+
+
+
+
+Manufacturer : Microsoft Corporation
+Model        : Virtual Machine
+
+
+
+
+=== spike-gpu ===
+os=windows arch=x86_64
+adapters wgpu can see:
+  Microsoft Basic Render Driver | Dx12 | Cpu | driver 10.0.26100.33648 
+
+using: Microsoft Basic Render Driver (Dx12, Cpu)
+  INDIRECT_FIRST_INSTANCE: yes
+  MULTI_DRAW_INDIRECT_COUNT: yes
+  TEXTURE_BINDING_ARRAY: yes
+  TIMESTAMP_QUERY: yes
+  downlevel INDIRECT_EXECUTION: yes
+  max_storage_buffer_binding_size: 2047 MiB, max_buffer_size: 2047 MiB, max_texture_array_layers: 2048
+
+== vertex pulling + first_vertex/first_instance, 10000 draws x 16 quads, 1600x1600 target
+mode                                            record (ms)    submit+wait   wrong px
+10,000 x draw(first_vertex, first_instance)            1.76         131.17          0
+10,000 x draw_indirect                                 3.28         222.50          0
+1 x multi_draw_indirect(10,000)                        0.49         212.91          0
+wrong px must be 0: it means every draw got the right quads (first_vertex) and chunk record (first_instance).
+
+== pinholes: greedy-meshed terrain seen from 40 random camera poses, 512x512
+background is magenta; every pixel of the view should land on terrain, so magenta = pinhole
+scene               quads  tjunc        eps 0   eps 0.0001   eps 0.0005    eps 0.002     eps 0.01   (pinhole pixels / poses affected)
+terrain (smooth)     2477     31        26/20          1/1          2/2          1/1          0/0
+terrain (rough)      6821    116          4/4         10/8          3/3          0/0          0/0
+eps is the outward push of each quad corner, in blocks.
+
+
+=== spike-wasmtime ===
+os=windows arch=x86_64 guest=743 bytes
+
+== epoch interruption OFF
+compile: 4.3848ms
+instantiate (incl. store): 91.6µs
+guest->host call: 3.1 ns/call  (loop with host 364µs, without 57.4µs, n=100000)
+host->guest call: 13.3 ns/call
+pure guest loop, 200M iterations: 118.2404ms
+
+== epoch interruption ON
+compile: 2.3902ms
+instantiate (incl. store): 24.2µs
+guest->host call: 3.0 ns/call  (loop with host 404.9µs, without 104.4µs, n=100000)
+host->guest call: 13.5 ns/call
+pure guest loop, 200M iterations: 206.562ms
+
+== epoch interrupt latency (tick = 1 ms, deadline = 1 tick)
+time until trap: min 1.037ms  median 1.4959ms  max 2.7687ms  (30 runs)
+
+=== spike-mesher ===
+case                     median        p99      masks    quads      naive   tjunc
+terrain (rough)        208.0 µs   332.4 µs    37.7 µs     6821       6918     116
+terrain (smooth)        55.4 µs   102.9 µs    38.9 µs     2477       2719      31
+flat                    12.3 µs    31.9 µs    39.6 µs        1       1024       0
+boxes                   65.9 µs   153.5 µs    30.8 µs      978       5423     818
+solid                    5.7 µs    11.1 µs    58.3 µs        0          0       0
+empty                    5.7 µs    11.6 µs    20.5 µs        0          0       0
+noise 50%, 4 mats     1607.9 µs  2325.3 µs   162.9 µs    49068      49176     116
+checker (worst)       1101.7 µs  2450.9 µs    34.0 µs    98304      98304       0
+
+median/p99: greedy mesh with cached opacity masks. masks: building them from voxels.
+naive: unit faces a non-merging mesher would emit. tjunc: coplanar T-junction vertices.
+
+=== spike-redb ===
+profile: noisy underground
+database: voxel-redb-test\world.redb
+chunks: 20250  raw packed: 285 MB
+zstd level 3: total 65 MB, median 4002 B, p90 4069 B, max 4269 B
+zstd level 3 + 64 KB dictionary: total 67 MB, median 4056 B, p90 4210 B, max 4513 B
+  surface chunks only, with dictionary: median 271 B
+
+== bulk write: 20250 chunks in batches of 500
+total 343.0267ms = 59033 chunks/s; commit median 4.6536ms max 26.0179ms
+file 134 MB for 67 MB of blobs (2.01x); disk written n/a
+
+== point reads: 20250 random keys, one read transaction
+median 700ns  p99 1.4µs  max 36.3µs
+
+== autosave: 200 commits x 200 overwritten chunks
+commit median 28.9982ms  p99 47.5922ms  max 54.3837ms
+file grew 0 MB for ~132 MB of changed blobs (disk write counter unavailable on this OS)
+
+== compact: 134 -> 114 MB in 61.998ms (did work: true)
+
+=== spike-circuit ===
+== 1. many small circuits: 10,000 units x 10 components
+build: 40.288ms  components 100000  nets 99000  blocks placed 221000
+per tick: 10000 components switched (10.0% of 100000), 9000 nets solved, 13000 wire cells changed
+step time: median 1.195 ms  p99 3.220 ms  max 3.944 ms
+target (section 2): <= 5 ms
+
+== 2. one huge net: 100,000 wire cells, 10,000 sources, 100 toggled per tick
+step time: median 1.315 ms  p99 1.910 ms  max 1.962 ms
+wire cells changing per tick: 1478
+(no section 2 target for this case; it shows the cost of one big dirty net)
+
+== 3. editing wire in a straight net (net rebuild cost)
+net size       extend end     remove end     cut middle    heal middle
+100                2.7 µs         2.6 µs         4.3 µs         2.9 µs
+1000              13.9 µs        13.7 µs        14.1 µs        13.4 µs
+10000            125.3 µs       125.0 µs       130.7 µs       125.9 µs
+100000          2204.7 µs      2277.0 µs      2112.4 µs      2242.9 µs
+(edit call only; the solve that follows happens in the next step)
+
+=== spike-quinn ===
+load: 30 Hz x 200 B datagrams server->client for 12 s; latency is one-way
+link: RTT 150 ms, jitter ±3 ms, 20 Mbit/s each way, 150 ms drop-tail queue
+
+== random loss 2% each way
+scenario                      deliv%   p50ms   p90ms   p99ms   maxms   gap ms bulk Mb/s q-drops d/u
+datagrams only                  97.0      79      85      92      93       77       0.0         0/0
+same conn, Cubic unpaced        97.2     102     156     217     223      174       0.8         0/0
+same conn, BBR unpaced          96.1      95     190     222     233      175      13.2      1877/0
+same conn, BBR paced 50%        97.2      93      96     130     150       96       9.8         0/0
+2nd conn, Cubic unpaced         97.8      79      85      93      95       79       0.8         0/0
+2nd conn, BBR unpaced           98.6      80     159     222     222      190      11.9       973/0
+2nd conn, BBR paced 50%         98.6      80      95     143     175      127       9.9         0/0
+
+== random loss 0% each way
+scenario                      deliv%   p50ms   p90ms   p99ms   maxms   gap ms bulk Mb/s q-drops d/u
+datagrams only                 100.0      79      87      92      93       53       0.0         0/0
+same conn, Cubic unpaced        99.4     111     183     238     238      127      16.4       290/0
+same conn, BBR unpaced          97.5     127     216     238     239      207      15.5      4191/0
+same conn, BBR paced 50%       100.0      82      96      96     127       79       9.9         0/0
+2nd conn, Cubic unpaced        100.0      96     174     223     223       79      16.1       297/0
+2nd conn, BBR unpaced          100.0     127     221     224     236      191      14.9      4184/0
+2nd conn, BBR paced 50%        100.0      80      93     112     175      127       9.9         0/0
+
+deliv%: datagrams received / sent. gap: longest silence between received datagrams.
+q-drops d/u: packets dropped at the full queue, server->client / client->server.
