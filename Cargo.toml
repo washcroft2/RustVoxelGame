@@ -1,11 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["xtask", "spikes/*"]
+members = ["xtask", "crates/*", "spikes/*"]
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.98"
 publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [profile.release]
 lto = "thin"
