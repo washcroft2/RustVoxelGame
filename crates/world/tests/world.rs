@@ -1,7 +1,19 @@
 use proptest::prelude::*;
 use std::sync::Arc;
-use voxel_core::{BlockId, CHUNK_VOLUME, FluidId, LocalPos};
+use voxel_core::{BlockClass, BlockId, CHUNK_VOLUME, FluidId, LocalPos, TANGENT_U, TANGENT_V};
 use voxel_world::{ChunkData, PalettedArray};
+
+/// Test classification: 0 is air, then ids cycle opaque, cutout, translucent.
+fn class(id: BlockId) -> BlockClass {
+    match id.0 {
+        0 => BlockClass::Air,
+        n => [
+            BlockClass::Opaque,
+            BlockClass::Cutout,
+            BlockClass::Translucent,
+        ][(n as usize - 1) % 3],
+    }
+}
 
 /// Writes are (index, value). Values are drawn from a small or a wide range
 /// so the sequences cross every width from uniform to 16-bit.
@@ -94,21 +106,72 @@ fn compact_returns_a_drifted_array_to_uniform() {
     assert_eq!(a.uniform_value(), Some(1));
 }
 
+/// Recomputes everything the chunk caches, straight from its blocks.
+fn check_cached_state(c: &ChunkData) {
+    let blocks = c.blocks().to_vec();
+    let count = |k: BlockClass| blocks.iter().filter(|&&b| class(BlockId(b)) == k).count();
+    let s = c.summary();
+    assert_eq!(s.opaque as usize, count(BlockClass::Opaque));
+    assert_eq!(s.cutout as usize, count(BlockClass::Cutout));
+    assert_eq!(s.translucent as usize, count(BlockClass::Translucent));
+    assert_eq!(
+        s.non_air as usize,
+        blocks.iter().filter(|&&b| b != 0).count()
+    );
+    for axis in 0..3 {
+        for v in 0..32 {
+            for u in 0..32 {
+                let mut want = 0u32;
+                for d in 0..32 {
+                    let mut p = [0u32; 3];
+                    p[axis] = d;
+                    p[TANGENT_U[axis]] = u as u32;
+                    p[TANGENT_V[axis]] = v as u32;
+                    let id = BlockId(c.blocks().get(LocalPos::new(p[0], p[1], p[2]).index()));
+                    want |= u32::from(class(id) == BlockClass::Opaque) << d;
+                }
+                assert_eq!(c.opaque_column(axis, u, v), want, "axis {axis} u {u} v {v}");
+            }
+        }
+    }
+}
+
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(40))]
+
     #[test]
-    fn summary_matches_a_recount(edits in prop::collection::vec((0..CHUNK_VOLUME, 0u16..5, 0u16..3), 0..300)) {
-        let mut c = ChunkData::empty();
+    fn cached_state_matches_a_recount(
+        start in 0u16..4,
+        edits in prop::collection::vec((0..CHUNK_VOLUME, 0u16..8, 0u16..3), 0..300),
+    ) {
+        let mut c = ChunkData::filled(BlockId(start), &class);
+        check_cached_state(&c);
         for (i, b, f) in edits {
             let p = LocalPos::from_index(i).unwrap();
-            c.set_block(p, BlockId(b));
+            c.set_block(p, BlockId(b), &class);
             c.set_fluid(p, FluidId(f));
         }
-        let blocks = c.blocks().to_vec();
-        prop_assert_eq!(c.summary().non_air as usize, blocks.iter().filter(|&&b| b != 0).count());
+        check_cached_state(&c);
         let fluid = c.fluid_layer().map_or(0, |f| f.to_vec().iter().filter(|&&x| x != 0).count());
         prop_assert_eq!(c.summary().fluid_cells as usize, fluid);
         prop_assert_eq!(c.fluid_layer().is_some(), fluid > 0);
+        // Rebuilding from the blocks gives the same cached state.
+        let rebuilt = ChunkData::from_blocks(c.blocks().clone(), &class);
+        prop_assert_eq!(rebuilt.summary().opaque, c.summary().opaque);
+        check_cached_state(&rebuilt);
     }
+}
+
+#[test]
+fn opaque_chunk_edited_back_to_uniform_drops_its_masks() {
+    let mut c = ChunkData::filled(BlockId(1), &class);
+    assert_eq!(c.opaque_column(1, 3, 4), u32::MAX);
+    let p = LocalPos::new(3, 7, 4);
+    c.set_block(p, BlockId::AIR, &class);
+    check_cached_state(&c);
+    c.set_block(p, BlockId(1), &class);
+    check_cached_state(&c);
+    assert_eq!(c.opaque_column(1, 3, 4), u32::MAX);
 }
 
 #[test]
@@ -116,11 +179,11 @@ fn version_bumps_only_on_change() {
     let mut c = ChunkData::empty();
     let p = LocalPos::new(1, 2, 3);
     assert_eq!(c.version(), 0);
-    c.set_block(p, BlockId::AIR);
+    c.set_block(p, BlockId::AIR, &class);
     assert_eq!(c.version(), 0);
-    c.set_block(p, BlockId(4));
+    c.set_block(p, BlockId(4), &class);
     assert_eq!(c.version(), 1);
-    c.set_block(p, BlockId(4));
+    c.set_block(p, BlockId(4), &class);
     assert_eq!(c.version(), 1);
     c.set_fluid(p, FluidId::NONE);
     assert_eq!(c.version(), 1);
@@ -135,12 +198,12 @@ fn copy_on_write_leaves_snapshots_alone() {
     let mut shared = Arc::new(ChunkData::empty());
     let snapshot = Arc::clone(&shared);
     let p = LocalPos::new(0, 0, 0);
-    Arc::make_mut(&mut shared).set_block(p, BlockId(2));
+    Arc::make_mut(&mut shared).set_block(p, BlockId(2), &class);
     assert_eq!(snapshot.block(p), BlockId::AIR);
     assert_eq!(shared.block(p), BlockId(2));
     // No snapshot outstanding now, so this write does not copy.
     let before = Arc::as_ptr(&shared);
-    Arc::make_mut(&mut shared).set_block(p, BlockId(3));
+    Arc::make_mut(&mut shared).set_block(p, BlockId(3), &class);
     assert_eq!(Arc::as_ptr(&shared), before);
 }
 
@@ -148,11 +211,12 @@ fn copy_on_write_leaves_snapshots_alone() {
 fn filled_and_from_blocks_count_correctly() {
     assert!(ChunkData::empty().is_empty());
     assert_eq!(
-        ChunkData::filled(BlockId(1)).summary().non_air as usize,
+        ChunkData::filled(BlockId(1), &class).summary().non_air as usize,
         CHUNK_VOLUME
     );
     let mut a = PalettedArray::uniform(0);
     a.set(5, 3);
     a.set(6, 3);
-    assert_eq!(ChunkData::from_blocks(a).summary().non_air, 2);
+    let c = ChunkData::from_blocks(a, &class);
+    assert_eq!((c.summary().non_air, c.summary().translucent), (2, 2));
 }

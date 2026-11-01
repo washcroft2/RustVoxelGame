@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use voxel_core::{BlockId, Face, Identifier};
+use voxel_core::{BlockClass, BlockClasses, BlockId, Face, Identifier};
 
 use crate::pack::TextureSource;
 use crate::{ContentError, Pack};
@@ -45,6 +45,21 @@ pub struct Registry {
     blocks: Vec<BlockDef>,
     by_name: HashMap<Identifier, BlockId>,
     textures: Vec<Identifier>,
+}
+
+impl BlockClasses for Registry {
+    /// Unknown IDs count as air.
+    fn class(&self, id: BlockId) -> BlockClass {
+        match self.block(id) {
+            None => BlockClass::Air,
+            Some(_) if id == BlockId::AIR => BlockClass::Air,
+            Some(b) => match b.layer {
+                RenderLayer::Opaque => BlockClass::Opaque,
+                RenderLayer::Cutout => BlockClass::Cutout,
+                RenderLayer::Translucent => BlockClass::Translucent,
+            },
+        }
+    }
 }
 
 impl Registry {

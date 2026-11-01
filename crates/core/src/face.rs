@@ -55,3 +55,9 @@ impl Face {
         Self::ALL[self as usize ^ 1]
     }
 }
+
+/// For a face normal along axis `a`, quads span `TANGENT_U[a]` (width) and
+/// `TANGENT_V[a]` (height): X -> (Y, Z), Y -> (Z, X), Z -> (X, Y).
+pub const TANGENT_U: [usize; 3] = [1, 2, 0];
+/// See [`TANGENT_U`].
+pub const TANGENT_V: [usize; 3] = [2, 0, 1];

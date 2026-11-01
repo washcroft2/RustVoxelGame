@@ -6,6 +6,8 @@ mod face;
 mod id;
 mod pos;
 
-pub use face::Face;
-pub use id::{BlockId, DimensionId, FluidId, Identifier, IdentifierError, Tick};
+pub use face::{Face, TANGENT_U, TANGENT_V};
+pub use id::{
+    BlockClass, BlockClasses, BlockId, DimensionId, FluidId, Identifier, IdentifierError, Tick,
+};
 pub use pos::{BlockPos, CHUNK_BITS, CHUNK_SIZE, CHUNK_VOLUME, ChunkKey, ChunkPos, LocalPos};

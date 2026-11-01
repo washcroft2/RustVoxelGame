@@ -1994,6 +1994,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "voxel-mesh"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "voxel-content",
+ "voxel-core",
+ "voxel-world",
+]
+
+[[package]]
 name = "voxel-world"
 version = "0.0.0"
 dependencies = [

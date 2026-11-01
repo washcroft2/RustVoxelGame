@@ -10,6 +10,32 @@ impl BlockId {
     pub const AIR: BlockId = BlockId(0);
 }
 
+/// How a block takes part in rendering and occlusion. The mesher and the
+/// chunk's cached opacity masks are built on this, not on block names.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum BlockClass {
+    /// Empty. Always [`BlockId::AIR`], and no other block.
+    Air,
+    /// Hides the faces of anything touching it.
+    Opaque,
+    /// Alpha-tested, like leaves.
+    Cutout,
+    /// Blended, like glass.
+    Translucent,
+}
+
+/// Answers [`BlockClass`] for block IDs. Implemented by the content registry;
+/// a closure works in tests.
+pub trait BlockClasses {
+    fn class(&self, id: BlockId) -> BlockClass;
+}
+
+impl<F: Fn(BlockId) -> BlockClass> BlockClasses for F {
+    fn class(&self, id: BlockId) -> BlockClass {
+        self(id)
+    }
+}
+
 /// Runtime fluid ID. [`FluidId::NONE`] is always 0.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FluidId(pub u16);
