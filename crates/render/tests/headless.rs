@@ -339,3 +339,117 @@ fn block_id_zero_is_air_in_the_test_registry() {
         Some(BlockId::AIR)
     );
 }
+
+/// A lone block of `id` in chunk (0,0,0), meshed.
+fn lone_block(reg: &Registry, name: &str) -> ChunkMesh {
+    let mut c = ChunkData::empty();
+    c.set_block(
+        LocalPos::new(8, 8, 8),
+        reg.block_id(&name.parse().unwrap()).unwrap(),
+        reg,
+    );
+    mesh_of(&c, reg)
+}
+
+#[test]
+fn staging_buffers_are_reused_without_mixing_up_data() {
+    let (reg, images) = test_registry();
+    let Some(mut r) = renderer(&images, RenderConfig::default()) else {
+        return;
+    };
+    let (stone, dirt) = (lone_block(&reg, "t:stone"), lone_block(&reg, "t:dirt"));
+    let top_view = looking_at([8.5, 12.5, 8.5], [8.5; 3]);
+    let want = |rgb: [u8; 3]| shaded(rgb, SHADE[Face::PosY.index()]);
+    let mut checked = 0;
+    // Hundreds of uploads through the ring, with the GPU allowed to run behind.
+    for frame in 0..400 {
+        let (mesh, rgb) = if frame % 3 == 0 {
+            (&dirt, [134, 96, 67])
+        } else {
+            (&stone, STONE)
+        };
+        r.set_chunk(key(0, 0, 0), mesh);
+        r.render(&top_view, DimensionId::OVERWORLD).unwrap();
+        if frame % 7 == 0 {
+            let got = pixel(&r.read_pixels().unwrap(), SIZE / 2, SIZE / 2);
+            assert!(
+                near(got, want(rgb), 3),
+                "frame {frame}: got {got:?}, want {:?}",
+                want(rgb)
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 50);
+}
+
+#[test]
+fn a_mesh_larger_than_one_staging_buffer_uploads_whole() {
+    let (reg, images) = test_registry();
+    // A small budget gives a 1 MiB staging buffer; the mesh below is about 1.2 MB.
+    let cfg = RenderConfig {
+        upload_budget_bytes: 2 << 20,
+        ..RenderConfig::default()
+    };
+    let Some(mut r) = renderer(&images, cfg) else {
+        return;
+    };
+    let stone = reg.block_id(&"t:stone".parse().unwrap()).unwrap();
+    let mut chunk = ChunkData::empty();
+    for i in 0..32768 {
+        let l = LocalPos::from_index(i).unwrap();
+        if (l.x() + l.y() + l.z()).is_multiple_of(2) {
+            chunk.set_block(l, stone, &reg);
+        }
+    }
+    let mesh = mesh_of(&chunk, &reg);
+    let bytes = mesh.quad_count() as u64 * 12;
+    assert!(
+        bytes > 1 << 20,
+        "test mesh should exceed one staging buffer, got {bytes}"
+    );
+    r.set_chunk(key(0, 0, 0), &mesh);
+    let cam = looking_at([16.0, 60.0, 16.0], [16.0, 16.0, 16.0]);
+    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    assert_eq!(
+        (s.uploaded_bytes, s.dropped_layers, s.pool_quads_used),
+        (bytes, 0, mesh.quad_count() as u64)
+    );
+    let img = r.read_pixels().unwrap();
+    let sky = RenderConfig::default()
+        .sky
+        .map(|c| (linear_to_srgb(c) * 255.0).round() as u8);
+    assert!(
+        !near(pixel(&img, SIZE / 2, SIZE / 2), sky, 2),
+        "the big chunk should be visible"
+    );
+}
+
+#[test]
+fn staging_memory_stays_flat_over_many_uploads() {
+    let (reg, images) = test_registry();
+    let Some(mut r) = renderer(&images, RenderConfig::default()) else {
+        return;
+    };
+    let (stone, dirt) = (lone_block(&reg, "t:stone"), lone_block(&reg, "t:dirt"));
+    let cam = looking_at([8.5, 12.5, 8.5], [8.5; 3]);
+    let run = |r: &mut Renderer, frames: usize| {
+        for f in 0..frames {
+            r.set_chunk(key(0, 0, 0), if f % 2 == 0 { &stone } else { &dirt });
+            r.render(&cam, DimensionId::OVERWORLD).unwrap();
+            r.wait_idle();
+        }
+    };
+    run(&mut r, 20);
+    let Some(before) = r.gpu_memory_bytes() else {
+        eprintln!("this backend cannot report GPU memory: skipping the memory check");
+        return;
+    };
+    run(&mut r, 300);
+    let after = r.gpu_memory_bytes().unwrap();
+    // A ring that never recycled would add a staging buffer (1 MiB or more) per frame.
+    assert!(
+        after < before + (16 << 20),
+        "GPU memory grew from {before} to {after} bytes"
+    );
+}

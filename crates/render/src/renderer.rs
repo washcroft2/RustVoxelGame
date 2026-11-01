@@ -127,7 +127,6 @@ enum Output {
 /// Per-frame scratch buffers, kept between frames so drawing allocates nothing in steady state.
 #[derive(Default)]
 struct Scratch {
-    words: Vec<u32>,
     records: Vec<[f32; 4]>,
     /// (distance squared, entry index) of chunks that passed culling.
     visible: Vec<(f32, usize)>,
@@ -155,6 +154,8 @@ pub struct Renderer {
     texture_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
     pool: QuadPool,
+    /// Ring of mapped staging buffers that chunk uploads are written into.
+    staging: wgpu::util::StagingBelt,
     entries: Vec<Entry>,
     index: HashMap<ChunkKey, usize>,
     pending: HashMap<ChunkKey, ChunkMesh>,
@@ -302,6 +303,12 @@ impl Renderer {
         let indirect = indirect_buffer(device, indirect_capacity);
         let depth_view = depth_texture(device, size);
         let pool = QuadPool::new(config.slab_bytes);
+        // Staging buffers are reused once the GPU has copied out of them. Sized to hold a few
+        // average meshes; a larger single mesh just gets a buffer of its own.
+        let staging = wgpu::util::StagingBelt::new(
+            device.clone(),
+            (config.upload_budget_bytes / 2).clamp(1 << 20, 4 << 20),
+        );
         Ok(Self {
             gpu,
             output,
@@ -318,6 +325,7 @@ impl Renderer {
             texture_view,
             sampler,
             pool,
+            staging,
             entries: Vec::new(),
             index: HashMap::new(),
             pending: HashMap::new(),
@@ -329,6 +337,15 @@ impl Renderer {
     /// Adapter, backend and device type, for logs and the F3 overlay.
     pub fn gpu_description(&self) -> String {
         self.gpu.describe()
+    }
+
+    /// Bytes of GPU memory the device has allocated, where the backend can report it
+    /// (Vulkan and DX12 can; Metal may not). Walks the allocator, so don't call it every frame.
+    pub fn gpu_memory_bytes(&self) -> Option<u64> {
+        self.gpu
+            .device
+            .generate_allocator_report()
+            .map(|r| r.total_allocated_bytes)
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -387,7 +404,13 @@ impl Renderer {
     }
 
     /// Copies one chunk's mesh into the pool and swaps it in. Returns the bytes written.
-    fn upload(&mut self, key: ChunkKey, mesh: &ChunkMesh, dropped: &mut usize) -> u64 {
+    fn upload(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        key: ChunkKey,
+        mesh: &ChunkMesh,
+        dropped: &mut usize,
+    ) -> u64 {
         self.remove_entry(key);
         let origin = key.pos.origin();
         let mut entry = Entry {
@@ -400,7 +423,7 @@ impl Renderer {
             .into_iter()
             .enumerate()
         {
-            match self.upload_layer(layer) {
+            match self.upload_layer(enc, layer) {
                 Ok(Some((gpu, n))) => {
                     entry.layers[slot] = Some(gpu);
                     bytes += n;
@@ -417,7 +440,11 @@ impl Renderer {
     }
 
     #[allow(clippy::result_unit_err)]
-    fn upload_layer(&mut self, layer: &LayerMesh) -> Result<Option<(LayerGpu, u64)>, ()> {
+    fn upload_layer(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        layer: &LayerMesh,
+    ) -> Result<Option<(LayerGpu, u64)>, ()> {
         let quads = layer.quads.len();
         if quads == 0 {
             return Ok(None);
@@ -442,25 +469,43 @@ impl Renderer {
             (buffer, bg)
         };
         let place = self.pool.alloc(quads, &mut make).ok_or(())?;
-        let words = &mut self.scratch.words;
-        words.clear();
-        words.extend(layer.quads.iter().flat_map(|q| [q.w0, q.w1, q.w2]));
-        let data: &[u8] = bytemuck::cast_slice(words);
-        self.gpu.queue.write_buffer(
+        // Write straight into mapped staging memory; the copy into the slab is recorded in
+        // this frame's encoder, ahead of the draws that read it.
+        let bytes = u64::from(quads) * QUAD_BYTES;
+        let size = wgpu::BufferSize::new(bytes).ok_or(())?;
+        let mut view = self.staging.write_buffer(
+            enc,
             &self.pool.slabs[place.slab].buffer,
             u64::from(place.offset) * QUAD_BYTES,
-            data,
+            size,
         );
+        // The view is write-only (mapped GPU memory is slow to read). Its length is exactly
+        // 12 bytes per quad, so the iterator below fills it with no remainder.
+        view.slice(..)
+            .into_chunks::<12>()
+            .0
+            .write_iter(layer.quads.iter().map(|q| {
+                let mut b = [0u8; 12];
+                b[0..4].copy_from_slice(&q.w0.to_le_bytes());
+                b[4..8].copy_from_slice(&q.w1.to_le_bytes());
+                b[8..12].copy_from_slice(&q.w2.to_le_bytes());
+                b
+            }));
         Ok(Some((
             LayerGpu {
                 place,
                 starts: layer.face_ranges,
             },
-            data.len() as u64,
+            bytes,
         )))
     }
 
-    fn process_uploads(&mut self, camera_chunk: ChunkPos, stats: &mut FrameStats) {
+    fn process_uploads(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        camera_chunk: ChunkPos,
+        stats: &mut FrameStats,
+    ) {
         if self.pending.is_empty() {
             return;
         }
@@ -478,7 +523,7 @@ impl Renderer {
                 continue;
             };
             let mut dropped = 0;
-            stats.uploaded_bytes += self.upload(key, &mesh, &mut dropped);
+            stats.uploaded_bytes += self.upload(enc, key, &mesh, &mut dropped);
             stats.uploaded_chunks += 1;
             stats.dropped_layers += dropped;
         }
@@ -573,7 +618,6 @@ impl Renderer {
             camera.block_origin()[2],
         )
         .chunk();
-        self.process_uploads(cam_chunk, &mut stats);
 
         let frame = match &self.output {
             Output::Window { surface, .. } => match surface.get_current_texture() {
@@ -599,6 +643,9 @@ impl Renderer {
             stats.cpu_ms = started.elapsed().as_secs_f32() * 1e3;
             return Ok(stats);
         }
+
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        self.process_uploads(&mut enc, cam_chunk, &mut stats);
 
         let aspect = self.size.0 as f32 / self.size.1 as f32;
         let view_proj = camera.view_proj(aspect);
@@ -653,7 +700,6 @@ impl Renderer {
             (Output::Offscreen { color }, None) => color.create_view(&Default::default()),
             (Output::Window { .. }, None) => return Err(RenderError::NoFrame),
         };
-        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         {
             let [r, g, b] = self.config.sky.map(f64::from);
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -704,6 +750,8 @@ impl Renderer {
                 }
             }
         }
+        // The staging buffers go back on the belt once this submission has run.
+        self.staging.finish_and_recall_on_submit(&enc);
         queue.submit([enc.finish()]);
         self.pool.frame_submitted(queue);
         if let Some(f) = frame {
