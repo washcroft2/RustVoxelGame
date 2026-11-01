@@ -162,3 +162,48 @@ jobs:
           name: gpu-smoke-${{ matrix.name }}
           path: smoke/gpu-report.txt
           if-no-files-found: ignore
+
+  # Manual only (Actions tab, "Run workflow"): unzip each finished bundle and run its script the
+  # way a person would, then keep the report. Takes 10-20 minutes per system. Hosted runners are
+  # shared virtual machines (no real GPU), so the numbers are a sanity check, not measurements.
+  run-bundle:
+    name: run the bundle (${{ matrix.name }})
+    if: github.event_name == 'workflow_dispatch'
+    needs: bundle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+          - { name: macos, os: macos-latest }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: voxel-test-${{ matrix.name }}
+          path: dl
+      - name: Unzip
+        run: |
+          if [ "${{ matrix.name }}" = "windows" ]; then
+            powershell -NoProfile -Command "Expand-Archive -Path (Get-ChildItem dl/*.zip).FullName -DestinationPath ."
+          else
+            unzip -q dl/*.zip
+          fi
+      - name: Run the script
+        working-directory: voxel-test
+        run: |
+          case "${{ matrix.name }}" in
+            windows) cmd.exe //c run.bat < /dev/null ;;
+            macos) bash run.command < /dev/null ;;
+            linux) bash run.sh < /dev/null ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ matrix.name }}
+          path: |
+            voxel-test/voxel-report.txt
+            voxel-test/gpu-report.txt
+          if-no-files-found: warn
