@@ -129,6 +129,7 @@ impl Streamer {
 
     /// Collects finished work and starts new work for a camera in chunk `center`.
     pub fn update(&mut self, center: ChunkPos, renderer: &mut Renderer) {
+        voxel_core::span!("stream update");
         while let Ok(d) = self.done.try_recv() {
             self.in_flight -= 1;
             self.dirty = true;
@@ -211,6 +212,40 @@ impl Streamer {
         self.offsets = offsets;
         // Stay dirty while anything was left unscheduled, so the next update continues.
         self.dirty = !scheduled_all;
+    }
+
+    /// Re-meshes every loaded chunk that has a surface, one at a time on this thread, and returns
+    /// `(microseconds, quads)` for each pass. For measuring remesh cost per core without worker
+    /// contention; the chunks must already be settled so every neighbour is present.
+    pub fn measure_remesh(&self, registry: &Registry, passes: usize) -> Vec<(f32, u32)> {
+        let mut mesher = Mesher::new();
+        let mut mesh = ChunkMesh::default();
+        let mut out = Vec::new();
+        let keys: Vec<ChunkKey> = self
+            .meshed
+            .iter()
+            .filter(|(_, q)| **q > 0)
+            .map(|(k, _)| *k)
+            .collect();
+        for _ in 0..passes {
+            for &key in &keys {
+                let Some(nb) = self.neighbours(key) else {
+                    continue;
+                };
+                let Some(center) = nb[13].as_deref() else {
+                    continue;
+                };
+                let mut hood = Neighborhood::new(center);
+                for (i, c) in nb.iter().enumerate() {
+                    let o = [i as i32 % 3 - 1, i as i32 / 9 - 1, (i as i32 / 3) % 3 - 1];
+                    hood.set(o, c.as_deref());
+                }
+                let t = Instant::now();
+                mesher.mesh(&hood, registry, &mut mesh);
+                out.push((t.elapsed().as_secs_f32() * 1e6, mesh.quad_count() as u32));
+            }
+        }
+        out
     }
 
     /// The 27 chunks around `key`, or `None` if a needed neighbour is not generated yet.

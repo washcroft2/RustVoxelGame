@@ -529,6 +529,7 @@ impl Renderer {
         camera_chunk: ChunkPos,
         stats: &mut FrameStats,
     ) {
+        voxel_core::span!("process uploads");
         if self.pending.is_empty() {
             return;
         }
@@ -560,6 +561,7 @@ impl Renderer {
         frustum: &Frustum,
         stats: &mut FrameStats,
     ) {
+        voxel_core::span!("cull and build draws");
         let origin = camera.block_origin();
         let eye = camera.eye_in_block();
         let s = &mut self.scratch;
@@ -633,6 +635,7 @@ impl Renderer {
         dim: DimensionId,
         overlay: Option<&mut Overlay>,
     ) -> Result<FrameStats, RenderError> {
+        voxel_core::span!("render frame");
         let started = Instant::now();
         let mut stats = FrameStats {
             indirect: self.gpu.indirect_first_instance,

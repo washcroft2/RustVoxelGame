@@ -61,6 +61,7 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
         streamer.update(BlockPos::new(o[0], o[1], o[2]).chunk(), renderer);
         let s = renderer.render(camera, DimensionId::OVERWORLD, None)?;
         renderer.wait_idle();
+        crate::frame_mark();
         Ok(s)
     };
 
@@ -91,6 +92,23 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
         last.draw_calls,
         last.quads_drawn as f64 / 1e6
     );
+
+    // Remesh cost on the generated terrain, one chunk at a time on one thread.
+    let mut samples = streamer.measure_remesh(&world.registry, 5);
+    if !samples.is_empty() {
+        let mut us: Vec<f32> = samples.iter().map(|s| s.0).collect();
+        us.sort_by(f32::total_cmp);
+        samples.sort_by_key(|s| s.1);
+        let quads = samples[samples.len() / 2].1;
+        println!(
+            "remesh, {} surface-chunk meshes on one core: median {:.0} us, p90 {:.0}, p99 {:.0}, max {:.0}; median chunk has {quads} quads",
+            us.len(),
+            percentile(&us, 0.5),
+            percentile(&us, 0.9),
+            percentile(&us, 0.99),
+            us.last().copied().unwrap_or(0.0)
+        );
+    }
 
     // Fly in a straight line at a fixed pace, so every run covers the same ground.
     let (dt, mut times) = (1.0 / 60.0, Vec::new());

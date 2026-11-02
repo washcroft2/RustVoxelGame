@@ -5,6 +5,12 @@
 mod face;
 mod id;
 mod pos;
+mod profile;
+
+/// Used by `span!` in profile builds.
+#[cfg(feature = "profile")]
+#[doc(hidden)]
+pub use tracing as __tracing;
 
 pub use face::{Face, TANGENT_U, TANGENT_V};
 pub use id::{

@@ -233,6 +233,7 @@ impl State {
     }
 
     fn frame(&mut self) -> Result<()> {
+        voxel_core::span!("game frame");
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f64().min(0.1);
         self.last_frame = now;
@@ -297,6 +298,7 @@ impl State {
         self.last_stats =
             self.renderer
                 .render(&self.camera, DimensionId::OVERWORLD, overlay.as_mut())?;
+        crate::frame_mark();
         Ok(())
     }
 }

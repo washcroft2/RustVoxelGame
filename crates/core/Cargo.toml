@@ -5,8 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Profiling spans (plan section 11). Off in every shipped build; see `span!`.
+profile = ["dep:tracing"]
+
 [dependencies]
 thiserror = "=2.0.21"
+tracing = { version = "=0.1.44", optional = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }

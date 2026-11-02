@@ -70,6 +70,11 @@ const VERIFY_STEPS: &[Step] = &[
         // All features, so optional dependencies (the profiling build's Tracy) are checked too.
         args: &["deny", "--all-features", "check"],
     },
+    Step {
+        name: "profile build",
+        program: "cargo",
+        args: &["check", "-p", "voxel-game", "--features", "profile"],
+    },
 ];
 
 fn main() -> ExitCode {

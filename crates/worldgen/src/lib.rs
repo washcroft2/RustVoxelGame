@@ -147,6 +147,7 @@ impl Generator {
     /// world's height are empty, and chunks entirely underground are a uniform stone
     /// chunk, which costs no block memory.
     pub fn chunk(&self, key: ChunkKey, classes: &impl BlockClasses) -> ChunkData {
+        voxel_core::span!("generate chunk");
         let cy = key.pos.y;
         if !(0..self.height_chunks).contains(&cy) {
             return ChunkData::empty();

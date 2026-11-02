@@ -40,6 +40,7 @@ impl Mesher {
 
     /// Meshes the centre chunk of `nb`. `out` is cleared first, so it can be reused.
     pub fn mesh(&mut self, nb: &Neighborhood, registry: &Registry, out: &mut ChunkMesh) {
+        voxel_core::span!("mesh chunk");
         out.clear();
         let center = nb.center();
         let s = center.summary();
@@ -63,6 +64,7 @@ impl Mesher {
 
     /// Gathers the cached opaque columns of the centre chunk and its neighbours into padded columns.
     fn build_padded_opaque(&mut self, nb: &Neighborhood) {
+        voxel_core::span!("gather opaque columns");
         let off = |p: usize| match p {
             0 => -1,
             p if p == P - 1 => 1,
@@ -93,6 +95,7 @@ impl Mesher {
 
     /// Builds interior masks for the cutout and translucent blocks of the centre chunk.
     fn scan_other_layers(&mut self, center: &ChunkData, registry: &Registry) {
+        voxel_core::span!("scan cutout and translucent");
         for layer in self.other.iter_mut() {
             *layer = [[0; N * N]; 3];
         }
@@ -133,6 +136,7 @@ impl Mesher {
         layer: RenderLayer,
         out: &mut LayerMesh,
     ) {
+        voxel_core::span!("mesh layer");
         out.clear();
         for face in Face::ALL {
             self.mesh_face(nb, registry, layer, face, &mut out.quads);

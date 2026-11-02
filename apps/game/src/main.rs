@@ -61,7 +61,28 @@ enum Command {
     },
 }
 
+/// Starts Tracy collection. Only exists in `profile` builds.
+#[cfg(feature = "profile")]
+fn init_profiling() -> Result<()> {
+    use tracing_subscriber::layer::SubscriberExt;
+    let subscriber = tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default());
+    tracing::subscriber::set_global_default(subscriber)?;
+    eprintln!("profiling build: Tracy is collecting (local connections only)");
+    Ok(())
+}
+
+/// Marks the end of a frame for Tracy. Nothing in normal builds.
+#[cfg(feature = "profile")]
+pub fn frame_mark() {
+    tracing_tracy::client::frame_mark();
+}
+
+#[cfg(not(feature = "profile"))]
+pub fn frame_mark() {}
+
 fn main() -> Result<()> {
+    #[cfg(feature = "profile")]
+    init_profiling()?;
     let cli = Cli::parse();
     let world = world::World::load(cli.packs.as_deref(), cli.seed, cli.flat)?;
     match cli.command {
