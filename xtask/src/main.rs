@@ -6,6 +6,7 @@ use std::process::{Command, ExitCode};
 use anyhow::{Context, Result, bail};
 
 mod bundle;
+mod perf;
 mod rules;
 use clap::{Parser, Subcommand};
 
@@ -20,6 +21,12 @@ struct Cli {
 enum Task {
     /// Format, clippy (warnings denied), tests and cargo-deny.
     Verify,
+    /// Run the game benchmark and compare it with the targets in perf/targets.toml.
+    Perf {
+        /// Seconds of flythrough to measure.
+        #[arg(long, default_value_t = 10.0)]
+        seconds: f64,
+    },
     /// Pack the built Phase 0 spike programs into a zip for another machine.
     Bundle {
         /// Directory holding the built programs.
@@ -90,6 +97,10 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     match Cli::parse().command {
         Task::Verify => verify(),
+        Task::Perf { seconds } => perf::run(&perf::Spec {
+            seconds,
+            out_dir: perf::default_out_dir().to_path_buf(),
+        }),
         Task::Bundle {
             bin_dir,
             out_dir,

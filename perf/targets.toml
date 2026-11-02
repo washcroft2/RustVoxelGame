@@ -1,0 +1,25 @@
+# Performance targets, copied from voxel-engine-plan.md section 2.
+#
+# PROTECTED: AGENTS.md says a change to a target needs the owner's approval. `cargo xtask perf`
+# compares measurements to these. Regression baselines are a separate thing and are not
+# committed yet; they also need the owner's approval.
+
+# The Phase 1 gate scene: a flythrough at a 16-chunk radius, at hardware A's resolution.
+[flythrough]
+radius = 16
+width = 2560
+height = 1440
+# Plan section 2, "Frame rate, A": at least 144 fps. Checked on the mean over the flight.
+min_fps = 144
+
+# Plan section 2, "Remesh, typical surface chunk, cubes only": median per core.
+[remesh]
+max_median_us = 100
+
+# Plan section 2, "Frame time p99": at most 1.5x the median.
+# NOT ENFORCED YET. Run uncapped on a fast GPU, frames take about 0.4 ms, so a 2 ms hitch is a
+# 5x ratio while still being far inside a 6.9 ms frame. How to measure this target needs the
+# owner's decision; see docs/phase1/status.md.
+[frame_time]
+max_p99_over_median = 1.5
+enforced = false

@@ -22,6 +22,8 @@ pub struct BenchOptions {
     pub screenshot: Option<PathBuf>,
     /// Draw the debug overlay on the screenshot.
     pub overlay: bool,
+    /// Write the results as JSON, for `cargo xtask perf`.
+    pub json: Option<PathBuf>,
 }
 
 fn percentile(sorted: &[f32], p: f32) -> f32 {
@@ -77,6 +79,7 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
         }
     }
     let st = streamer.stats();
+    let settle_seconds = t0.elapsed().as_secs_f64();
     println!(
         "settled in {:.2} s ({frames} frames): {} chunks loaded, {} meshed, {} resident on the GPU, {:.2}M quads, remesh median {:.0} us",
         t0.elapsed().as_secs_f64(),
@@ -95,11 +98,20 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
 
     // Remesh cost on the generated terrain, one chunk at a time on one thread.
     let mut samples = streamer.measure_remesh(&world.registry, 5);
+    let mut remesh_json = "null".to_owned();
     if !samples.is_empty() {
         let mut us: Vec<f32> = samples.iter().map(|s| s.0).collect();
         us.sort_by(f32::total_cmp);
         samples.sort_by_key(|s| s.1);
         let quads = samples[samples.len() / 2].1;
+        remesh_json = format!(
+            "{{\"meshes\": {}, \"median_us\": {:.1}, \"p90_us\": {:.1}, \"p99_us\": {:.1}, \"max_us\": {:.1}, \"median_quads\": {quads}}}",
+            us.len(),
+            percentile(&us, 0.5),
+            percentile(&us, 0.9),
+            percentile(&us, 0.99),
+            us.last().copied().unwrap_or(0.0)
+        );
         println!(
             "remesh, {} surface-chunk meshes on one core: median {:.0} us, p90 {:.0}, p99 {:.0}, max {:.0}; median chunk has {quads} quads",
             us.len(),
@@ -144,6 +156,30 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
         "streaming during flight: peak {peak_pending} meshes waiting to upload, peak {peak_in_flight} jobs in flight, pool {} quads in {} slab(s)",
         last.pool_quads_used, last.pool_slabs
     );
+
+    if let Some(path) = &opts.json {
+        let ms = |p: f32| percentile(&times, p);
+        let json = format!(
+            "{{\n  \"gpu\": {:?},\n  \"radius\": {},\n  \"width\": {},\n  \"height\": {},\n  \"settle_seconds\": {:.3},\n  \"chunks_loaded\": {},\n  \"flight\": {{\"seconds\": {}, \"speed\": {}, \"frames\": {}, \"mean_ms\": {mean:.4}, \"median_ms\": {:.4}, \"p99_ms\": {:.4}, \"max_ms\": {:.4}}},\n  \"remesh\": {remesh_json}\n}}\n",
+            renderer.gpu_description(),
+            opts.radius,
+            opts.size.0,
+            opts.size.1,
+            settle_seconds,
+            st.loaded,
+            opts.seconds,
+            opts.speed,
+            times.len(),
+            ms(0.5),
+            ms(0.99),
+            times.last().copied().unwrap_or(0.0),
+        );
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))?;
+        println!("results: {}", path.display());
+    }
 
     if let Some(path) = opts.screenshot {
         let o = camera.block_origin();

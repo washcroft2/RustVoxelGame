@@ -58,6 +58,9 @@ enum Command {
         /// Draw the F3 overlay on the saved frame.
         #[arg(long)]
         overlay: bool,
+        /// Write the results as JSON (used by `cargo xtask perf`).
+        #[arg(long)]
+        json: Option<PathBuf>,
     },
 }
 
@@ -93,6 +96,7 @@ fn main() -> Result<()> {
             speed,
             screenshot,
             overlay,
+            json,
         }) => bench::run(
             world,
             bench::BenchOptions {
@@ -102,6 +106,7 @@ fn main() -> Result<()> {
                 speed,
                 screenshot,
                 overlay,
+                json,
             },
         ),
         None => app::run(
