@@ -40,7 +40,12 @@ fn test_registry() -> (Registry, Vec<TextureImage>) {
 fn renderer(images: &[TextureImage], config: RenderConfig) -> Option<Renderer> {
     match Renderer::new_headless((SIZE, SIZE), images, config) {
         Ok(r) => Some(r),
-        Err(RenderError::NoAdapter | RenderError::Device(_)) => {
+        Err(e @ (RenderError::NoAdapter | RenderError::Device(_))) => {
+            // CI sets this so a runner without a working adapter fails instead of passing by skipping.
+            assert!(
+                std::env::var_os("VOXEL_REQUIRE_GPU").is_none(),
+                "VOXEL_REQUIRE_GPU is set but there is no usable adapter: {e}"
+            );
             eprintln!("no graphics adapter: skipping");
             None
         }

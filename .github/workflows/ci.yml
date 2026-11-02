@@ -15,6 +15,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The render tests skip when there is no graphics adapter. On CI that would hide a broken
+  # runner, so they fail instead: lavapipe on Linux, WARP on Windows, the virtual Metal GPU on macOS.
+  VOXEL_REQUIRE_GPU: "1"
   RUST_VERSION: "1.98.1"
   SPIKES: >-
     -p spike-gpu -p spike-wasmtime -p spike-mesher
@@ -54,6 +57,10 @@ jobs:
       - name: Install cargo-deny
         if: steps.deny.outputs.cache-hit != 'true'
         run: cargo install cargo-deny --locked --version 0.20.2
+      - name: Install a software Vulkan driver (lavapipe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1
       - run: cargo xtask verify
 
   # Windows and macOS: does it compile warning-free, and do the tests pass?
