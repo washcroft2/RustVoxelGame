@@ -4,6 +4,13 @@ Where Phase 1 ("Core and local rendering", plan section 13) stands. Numbers were
 machine (Ryzen 7 5700X, RTX 2060 Super, Vulkan, Linux; see `docs/phase0/machines.md`) unless
 stated. Nothing here has run on real Windows or macOS hardware.
 
+## Gate
+
+Closed on CI and the Linux PC by the owner's decision (`docs/decisions/0005`). Hosted CI is green
+on all three systems with the render tests required to find a graphics adapter (lavapipe on
+Linux, WARP on Windows, a virtual GPU on macOS). Real Windows and Mac hardware were not run, so
+their frame rates are unmeasured. One question is still open (number 1 below).
+
 ## Items
 
 | Plan item | State |
@@ -61,10 +68,9 @@ GPU memory at radius 16 is about 88 MB (quad pool 7 MB).
 
 ## Not done, and why
 
-- **Real hardware.** No Windows PC, MacBook or weakest-machine runs. CI renders the same tests on
-  Windows software rendering (WARP) and a virtual Mac GPU, and on Linux with lavapipe, but those
-  say nothing about speed or about real drivers.
-- **Phase 1 gate on machines A and B.** Needs the family machines; see above.
+- **Real hardware.** No Windows PC, MacBook or weakest-machine runs, by decision 0005. CI renders
+  the same tests on Windows software rendering (WARP) and a virtual Mac GPU, and on Linux with
+  lavapipe, but those say nothing about speed or about real drivers.
 - **Non-cube blocks, the overlay mesh for fast-changing blocks, cave-culling bits, light in
   quads, translucent sorting within a chunk.** Not in the Phase 1 list; later phases.
 - **Texture orientation and mip bleeding** have only been seen on flat-colour textures. Check
