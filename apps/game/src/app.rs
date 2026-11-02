@@ -16,6 +16,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
+use crate::overlay::{DebugInfo, DebugOverlay};
 use crate::stream::{StreamConfig, Streamer};
 use crate::world::World;
 
@@ -34,7 +35,14 @@ struct State {
     speed: f64,
     last_frame: Instant,
     frame_ms: VecDeque<f32>,
-    last_title: Instant,
+    overlay: DebugOverlay,
+    overlay_on: bool,
+    started: Instant,
+    gpu_name: String,
+    gpu_memory: Option<u64>,
+    gpu_memory_at: Instant,
+    radius: i32,
+    last_stats: voxel_render::FrameStats,
 }
 
 struct App {
@@ -63,7 +71,7 @@ pub fn run(world: World, options: Options) -> Result<()> {
 impl App {
     fn start(&self, el: &ActiveEventLoop) -> Result<State> {
         let attrs = Window::default_attributes()
-            .with_title("voxel")
+            .with_title("voxel  (F3: debug info)")
             .with_inner_size(LogicalSize::new(1280, 720));
         let window = Arc::new(el.create_window(attrs)?);
         let size = window.inner_size();
@@ -92,6 +100,8 @@ impl App {
             Arc::clone(&self.world.registry),
         );
         let ground = f64::from(self.world.generator.surface_height(0, 0));
+        let overlay = DebugOverlay::new(self.world.font.clone());
+        let gpu_name = renderer.gpu_description();
         Ok(State {
             window,
             renderer,
@@ -107,7 +117,14 @@ impl App {
             speed: 14.0,
             last_frame: Instant::now(),
             frame_ms: VecDeque::new(),
-            last_title: Instant::now(),
+            overlay,
+            overlay_on: false,
+            started: Instant::now(),
+            gpu_name,
+            gpu_memory: None,
+            gpu_memory_at: Instant::now(),
+            radius: self.options.radius,
+            last_stats: Default::default(),
         })
     }
 }
@@ -143,6 +160,9 @@ impl ApplicationHandler for App {
                     ElementState::Pressed => {
                         if !event.repeat {
                             s.keys.insert(code);
+                        }
+                        if code == KeyCode::F3 && !event.repeat {
+                            s.overlay_on = !s.overlay_on;
                         }
                         if code == KeyCode::Escape && !event.repeat {
                             if s.grabbed {
@@ -241,27 +261,42 @@ impl State {
         let o = self.camera.block_origin();
         self.streamer
             .update(BlockPos::new(o[0], o[1], o[2]).chunk(), &mut self.renderer);
-        let stats = self.renderer.render(&self.camera, DimensionId::OVERWORLD)?;
+        let mut sorted: Vec<f32> = self.frame_ms.iter().copied().collect();
+        sorted.sort_by(f32::total_cmp);
+        let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0.0);
+        let p99 = sorted.get(sorted.len() * 99 / 100).copied().unwrap_or(0.0);
 
-        if self.last_title.elapsed() > Duration::from_millis(500) {
-            self.last_title = Instant::now();
-            let mut sorted: Vec<f32> = self.frame_ms.iter().copied().collect();
-            sorted.sort_by(f32::total_cmp);
-            let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0.0);
-            let p99 = sorted.get(sorted.len() * 99 / 100).copied().unwrap_or(0.0);
-            let st = self.streamer.stats();
-            let p = self.camera.position;
-            self.window.set_title(&format!(
-                "voxel | {:.0} fps  {median:.1} ms (p99 {p99:.1}) | chunks {} drawn / {} resident / {} loaded | {:.2}M quads | remesh {:.0} us | {:.0} {:.0} {:.0}",
-                1e3 / median.max(0.01),
-                stats.visible_chunks,
-                stats.resident_chunks,
-                st.loaded,
-                stats.quads_drawn as f64 / 1e6,
-                st.remesh_median_us,
-                p[0], p[1], p[2],
-            ));
-        }
+        let mut overlay = if self.overlay_on {
+            // The allocator report walks every allocation, so it is refreshed twice a second.
+            if self.gpu_memory_at.elapsed() > Duration::from_millis(500) {
+                self.gpu_memory = self.renderer.gpu_memory_bytes();
+                self.gpu_memory_at = Instant::now();
+            }
+            let size = self.window.inner_size();
+            let info = DebugInfo {
+                gpu: &self.gpu_name,
+                frame_ms_median: median,
+                frame_ms_p99: p99,
+                position: self.camera.position,
+                yaw: self.camera.yaw,
+                pitch: self.camera.pitch,
+                frame: self.last_stats,
+                stream: self.streamer.stats(),
+                gpu_memory_bytes: self.gpu_memory,
+                radius: self.radius,
+            };
+            Some(self.overlay.frame(
+                &info,
+                (size.width, size.height),
+                self.window.scale_factor() as f32,
+                self.started.elapsed().as_secs_f64(),
+            ))
+        } else {
+            None
+        };
+        self.last_stats =
+            self.renderer
+                .render(&self.camera, DimensionId::OVERWORLD, overlay.as_mut())?;
         Ok(())
     }
 }

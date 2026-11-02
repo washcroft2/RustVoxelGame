@@ -58,6 +58,18 @@ impl Default for RenderConfig {
     }
 }
 
+/// One frame of egui output to draw over the scene (the F3 overlay and other debug UI).
+///
+/// Build it from `egui::Context::run_ui` output: tessellate `shapes` with the context, and pass
+/// the `textures_delta` along. Every overlay produced must reach `render`, in order, or the font
+/// texture goes missing; `render` applies the texture changes even when it skips the frame.
+/// `render` takes the texture changes out of it, which egui requires before it is dropped.
+pub struct Overlay {
+    pub textures_delta: egui::TexturesDelta,
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    pub pixels_per_point: f32,
+}
+
 /// What the last frame did, for the F3 overlay and tests.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct FrameStats {
@@ -154,6 +166,7 @@ pub struct Renderer {
     texture_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
     pool: QuadPool,
+    egui: egui_wgpu::Renderer,
     /// Ring of mapped staging buffers that chunk uploads are written into.
     staging: wgpu::util::StagingBelt,
     entries: Vec<Entry>,
@@ -215,6 +228,10 @@ impl Renderer {
             })?;
         sc.format = format;
         sc.present_mode = choose_present_mode(config.present, &caps.present_modes);
+        // The overlay draws in gamma space, through a non-sRGB view of the same texture.
+        if format.remove_srgb_suffix() != format {
+            sc.view_formats = vec![format.remove_srgb_suffix()];
+        }
         surface.configure(&gpu.device, &sc);
         Self::build(
             gpu,
@@ -303,6 +320,11 @@ impl Renderer {
         let indirect = indirect_buffer(device, indirect_capacity);
         let depth_view = depth_texture(device, size);
         let pool = QuadPool::new(config.slab_bytes);
+        let egui = egui_wgpu::Renderer::new(
+            device,
+            color_format.remove_srgb_suffix(),
+            egui_wgpu::RendererOptions::default(),
+        );
         // Staging buffers are reused once the GPU has copied out of them. Sized to hold a few
         // average meshes; a larger single mesh just gets a buffer of its own.
         let staging = wgpu::util::StagingBelt::new(
@@ -325,6 +347,7 @@ impl Renderer {
             texture_view,
             sampler,
             pool,
+            egui,
             staging,
             entries: Vec::new(),
             index: HashMap::new(),
@@ -604,7 +627,12 @@ impl Renderer {
     }
 
     /// Draws one frame: uploads queued meshes within budget, culls, draws, presents.
-    pub fn render(&mut self, camera: &Camera, dim: DimensionId) -> Result<FrameStats, RenderError> {
+    pub fn render(
+        &mut self,
+        camera: &Camera,
+        dim: DimensionId,
+        overlay: Option<&mut Overlay>,
+    ) -> Result<FrameStats, RenderError> {
         let started = Instant::now();
         let mut stats = FrameStats {
             indirect: self.gpu.indirect_first_instance,
@@ -612,6 +640,22 @@ impl Renderer {
         };
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
         self.pool.collect();
+        // Texture changes must be applied even if the frame ends up skipped, or they are lost.
+        let mut to_free = Vec::new();
+        let overlay: Option<&Overlay> = match overlay {
+            Some(o) => {
+                for (id, deltas) in &o.textures_delta.set {
+                    for delta in deltas {
+                        self.egui
+                            .update_texture(&self.gpu.device, &self.gpu.queue, *id, delta);
+                    }
+                }
+                o.textures_delta.set.clear();
+                to_free.extend(std::mem::take(&mut o.textures_delta.free));
+                Some(&*o)
+            }
+            None => None,
+        };
         let cam_chunk = voxel_core::BlockPos::new(
             camera.block_origin()[0],
             camera.block_origin()[1],
@@ -638,6 +682,9 @@ impl Renderer {
             Output::Offscreen { .. } => None,
         };
         if matches!(self.output, Output::Window { .. }) && frame.is_none() {
+            for id in &to_free {
+                self.egui.free_texture(id);
+            }
             stats.resident_chunks = self.entries.len();
             stats.pending_uploads = self.pending.len();
             stats.cpu_ms = started.elapsed().as_secs_f32() * 1e3;
@@ -750,10 +797,56 @@ impl Renderer {
                 }
             }
         }
+        let mut extra = Vec::new();
+        if let Some(o) = overlay {
+            // egui writes gamma-space colours, so it draws through a non-sRGB view of the target.
+            let view = match (&self.output, &frame) {
+                (_, Some(f)) => f.texture.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.color_format.remove_srgb_suffix()),
+                    ..Default::default()
+                }),
+                (Output::Offscreen { color }, None) => {
+                    color.create_view(&wgpu::TextureViewDescriptor {
+                        format: Some(self.color_format.remove_srgb_suffix()),
+                        ..Default::default()
+                    })
+                }
+                (Output::Window { .. }, None) => return Err(RenderError::NoFrame),
+            };
+            let screen = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [self.size.0, self.size.1],
+                pixels_per_point: o.pixels_per_point,
+            };
+            extra =
+                self.egui
+                    .update_buffers(&self.gpu.device, queue, &mut enc, &o.primitives, &screen);
+            let mut pass = enc
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("overlay"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+            self.egui.render(&mut pass, &o.primitives, &screen);
+        }
         // The staging buffers go back on the belt once this submission has run.
         self.staging.finish_and_recall_on_submit(&enc);
-        queue.submit([enc.finish()]);
+        queue.submit(extra.into_iter().chain([enc.finish()]));
         self.pool.frame_submitted(queue);
+        for id in &to_free {
+            self.egui.free_texture(id);
+        }
         if let Some(f) = frame {
             queue.present(f);
         }
@@ -871,7 +964,7 @@ fn offscreen_texture(device: &wgpu::Device, size: (u32, u32)) -> wgpu::Texture {
         dimension: wgpu::TextureDimension::D2,
         format: OFFSCREEN_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &[OFFSCREEN_FORMAT.remove_srgb_suffix()],
     })
 }
 

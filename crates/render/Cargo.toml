@@ -7,6 +7,8 @@ publish.workspace = true
 
 [dependencies]
 bytemuck = { version = "=1.25.2", features = ["derive"] }
+egui = { version = "=0.37.0", default-features = false }
+egui-wgpu = { version = "=0.37.0", default-features = false }
 glam = "=0.34.2"
 offset-allocator = "=0.2.0"
 pollster = "=1.0.1"

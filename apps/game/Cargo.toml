@@ -9,6 +9,7 @@ publish.workspace = true
 anyhow = "=1.0.104"
 clap = { version = "=4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 crossbeam-channel = "=0.5.17"
+egui = { version = "=0.37.0", default-features = false }
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 voxel-content = { path = "../../crates/content", version = "0.0.0" }
 voxel-core = { path = "../../crates/core", version = "0.0.0" }

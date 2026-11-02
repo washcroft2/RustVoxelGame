@@ -8,6 +8,8 @@ use crate::ContentError;
 
 /// Longest pack file read, so a hostile pack can't make the loader allocate without bound.
 const MAX_FILE_BYTES: usize = 64 * 1024;
+/// Largest font file read.
+const MAX_FONT_BYTES: u64 = 4 << 20;
 
 /// `pack.toml`.
 #[derive(Debug, Clone, Deserialize)]
@@ -56,6 +58,8 @@ pub struct Pack {
     pub blocks: Vec<(String, BlockSource)>,
     /// Texture paths without the `.png` extension, sorted.
     pub textures: Vec<String>,
+    /// Font files under `fonts/`, as paths without the `.ttf` extension, sorted.
+    pub fonts: Vec<String>,
     /// Where the pack was read from; `None` for packs built in memory.
     pub root: Option<PathBuf>,
 }
@@ -91,6 +95,7 @@ impl Pack {
             manifest,
             blocks: parsed,
             textures,
+            fonts: Vec::new(),
             root: None,
         })
     }
@@ -107,8 +112,35 @@ impl Pack {
         }
         let textures = list(&dir.join("textures"), "png")?;
         let mut pack = Self::from_parts(&manifest, &blocks, textures)?;
+        pack.fonts = list(&dir.join("fonts"), "ttf")?;
         pack.root = Some(dir.to_path_buf());
         Ok(pack)
+    }
+
+    /// Reads one of the pack's fonts by name (as listed in [`Pack::fonts`]).
+    pub fn read_font(&self, name: &str) -> Result<Vec<u8>, ContentError> {
+        let path = format!("fonts/{name}.ttf");
+        let err = |message: String| ContentError::Invalid {
+            path: path.clone(),
+            message,
+        };
+        // Only names found by listing the folder are accepted, so `name` can't climb out of it.
+        if !self.fonts.iter().any(|f| f == name) {
+            return Err(err("no such font in this pack".into()));
+        }
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| err("the pack was not read from a directory".into()))?;
+        let file = root.join(&path);
+        let len = fs::metadata(&file).map_err(|e| err(e.to_string()))?.len();
+        if len > MAX_FONT_BYTES {
+            return Err(ContentError::TooLarge {
+                path,
+                limit: MAX_FONT_BYTES as usize,
+            });
+        }
+        fs::read(&file).map_err(|e| err(e.to_string()))
     }
 }
 

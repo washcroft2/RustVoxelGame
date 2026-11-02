@@ -12,6 +12,8 @@ pub struct World {
     pub registry: Arc<Registry>,
     pub images: Vec<TextureImage>,
     pub generator: Generator,
+    /// The base pack's font, for the debug overlay.
+    pub font: Vec<u8>,
 }
 
 /// Looks for `packs/base` in the working directory, beside the executable and in their parents,
@@ -43,6 +45,9 @@ impl World {
         let pack = Pack::read_dir(&dir).with_context(|| format!("loading {}", dir.display()))?;
         let registry =
             Registry::build(std::slice::from_ref(&pack)).context("building the block registry")?;
+        let font = pack
+            .read_font("monogram-extended")
+            .context("loading the base pack's font")?;
         let images = load_texture_images(&registry, &[pack]).context("loading textures")?;
         let blocks = TerrainBlocks::from_registry(&registry)
             .context("the base pack lacks terrain blocks")?;
@@ -55,6 +60,7 @@ impl World {
             registry: Arc::new(registry),
             images,
             generator: Generator::new(seed, terrain, blocks),
+            font,
         })
     }
 

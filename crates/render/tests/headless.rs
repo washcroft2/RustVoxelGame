@@ -7,7 +7,7 @@ use std::path::Path;
 use voxel_content::{Pack, Registry, TextureImage, load_texture_images};
 use voxel_core::{BlockId, ChunkKey, ChunkPos, DimensionId, Face, LocalPos};
 use voxel_mesh::{ChunkMesh, Mesher, Neighborhood};
-use voxel_render::{Camera, RenderConfig, RenderError, Renderer};
+use voxel_render::{Camera, Overlay, RenderConfig, RenderError, Renderer};
 use voxel_world::ChunkData;
 use voxel_worldgen::{Generator, NoiseParams, Terrain, TerrainBlocks};
 
@@ -127,7 +127,7 @@ fn every_face_is_visible_from_outside_with_its_own_shade() {
             8.5 + 4.0 * f64::from(n[2]),
         ];
         let stats = r
-            .render(&looking_at(from, [8.5; 3]), DimensionId::OVERWORLD)
+            .render(&looking_at(from, [8.5; 3]), DimensionId::OVERWORLD, None)
             .unwrap();
         assert!(stats.drawn);
         let got = pixel(&r.read_pixels().unwrap(), SIZE / 2, SIZE / 2);
@@ -143,7 +143,7 @@ fn empty_sky_is_the_clear_colour_and_nothing_is_drawn() {
         return;
     };
     let stats = r
-        .render(&Camera::default(), DimensionId::OVERWORLD)
+        .render(&Camera::default(), DimensionId::OVERWORLD, None)
         .unwrap();
     assert_eq!((stats.draw_calls, stats.visible_chunks), (0, 0));
     let sky = RenderConfig::default()
@@ -170,12 +170,12 @@ fn chunks_behind_the_camera_are_culled() {
         position: [8.0, 8.0, 8.0],
         ..Camera::default()
     };
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!((s.resident_chunks, s.visible_chunks), (2, 1));
     // Another dimension's chunks are not drawn.
     let other = ChunkKey::new(DimensionId(1), ChunkPos::new(0, 0, -3));
     r.set_chunk(other, &mesh);
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!((s.resident_chunks, s.visible_chunks), (3, 1));
 }
 
@@ -207,12 +207,12 @@ fn uploads_are_nearest_first_within_the_byte_budget() {
         position: [0.0, 0.0, 0.0],
         ..Camera::default()
     };
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!(
         (s.uploaded_chunks, s.pending_uploads, s.resident_chunks),
         (2, 1, 2)
     );
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!(
         (s.uploaded_chunks, s.pending_uploads, s.resident_chunks),
         (1, 0, 3)
@@ -231,20 +231,20 @@ fn replaced_and_removed_meshes_release_their_space_once_the_gpu_is_done() {
     let cam = looking_at([8.5, 8.5, 12.5], [8.5; 3]);
     for _ in 0..20 {
         r.set_chunk(key(0, 0, 0), &mesh_of(&chunk, &reg));
-        r.render(&cam, DimensionId::OVERWORLD).unwrap();
+        r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
         r.read_pixels().unwrap(); // waits for the GPU
     }
     // One more frame so the last frees are collected.
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!(
         s.pool_quads_used, 6,
         "only the current mesh should still be allocated"
     );
     r.remove_chunk(key(0, 0, 0));
     r.read_pixels().unwrap();
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     r.read_pixels().unwrap();
-    let s2 = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s2 = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!((s.resident_chunks, s2.pool_quads_used), (0, 0));
 }
 
@@ -319,7 +319,7 @@ fn terrain_seen_from_above_has_no_pinholes() {
             fov_y: 20f32.to_radians(),
             ..looking_at([48.0 + ox, target[1] + oy, 48.0 + oz], target)
         };
-        r.render(&cam, DimensionId::OVERWORLD).unwrap();
+        r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
         let img = r.read_pixels().unwrap();
         holes += img
             .as_chunks::<4>()
@@ -369,7 +369,7 @@ fn staging_buffers_are_reused_without_mixing_up_data() {
             (&stone, STONE)
         };
         r.set_chunk(key(0, 0, 0), mesh);
-        r.render(&top_view, DimensionId::OVERWORLD).unwrap();
+        r.render(&top_view, DimensionId::OVERWORLD, None).unwrap();
         if frame % 7 == 0 {
             let got = pixel(&r.read_pixels().unwrap(), SIZE / 2, SIZE / 2);
             assert!(
@@ -410,7 +410,7 @@ fn a_mesh_larger_than_one_staging_buffer_uploads_whole() {
     );
     r.set_chunk(key(0, 0, 0), &mesh);
     let cam = looking_at([16.0, 60.0, 16.0], [16.0, 16.0, 16.0]);
-    let s = r.render(&cam, DimensionId::OVERWORLD).unwrap();
+    let s = r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
     assert_eq!(
         (s.uploaded_bytes, s.dropped_layers, s.pool_quads_used),
         (bytes, 0, mesh.quad_count() as u64)
@@ -436,7 +436,7 @@ fn staging_memory_stays_flat_over_many_uploads() {
     let run = |r: &mut Renderer, frames: usize| {
         for f in 0..frames {
             r.set_chunk(key(0, 0, 0), if f % 2 == 0 { &stone } else { &dirt });
-            r.render(&cam, DimensionId::OVERWORLD).unwrap();
+            r.render(&cam, DimensionId::OVERWORLD, None).unwrap();
             r.wait_idle();
         }
     };
@@ -451,5 +451,70 @@ fn staging_memory_stays_flat_over_many_uploads() {
     assert!(
         after < before + (16 << 20),
         "GPU memory grew from {before} to {after} bytes"
+    );
+}
+
+#[test]
+fn the_overlay_draws_in_gamma_space_over_the_scene() {
+    let (_, images) = test_registry();
+    let Some(mut r) = renderer(&images, RenderConfig::default()) else {
+        return;
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packs/base");
+    let font = Pack::read_dir(&dir)
+        .unwrap()
+        .read_font("monogram-extended")
+        .unwrap();
+    let ctx = egui::Context::default();
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "f".into(),
+        std::sync::Arc::new(egui::FontData::from_owned(font)),
+    );
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("f".into());
+    }
+    ctx.set_fonts(fonts);
+    ctx.set_pixels_per_point(1.0);
+    let overlay = |t: f64| {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(64.0, 64.0),
+            )),
+            time: Some(t),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(raw, |ui| {
+            let rect = egui::Rect::from_min_size(egui::pos2(8.0, 8.0), egui::vec2(16.0, 16.0));
+            ui.painter()
+                .rect_filled(rect, 0.0, egui::Color32::from_gray(128));
+        });
+        Overlay {
+            primitives: ctx.tessellate(out.shapes, out.pixels_per_point),
+            textures_delta: out.textures_delta,
+            pixels_per_point: out.pixels_per_point,
+        }
+    };
+    r.render(
+        &Camera::default(),
+        DimensionId::OVERWORLD,
+        Some(&mut overlay(0.0)),
+    )
+    .unwrap();
+    let img = r.read_pixels().unwrap();
+    // Opaque mid-grey must come out as 128 in the output bytes. Drawn into an sRGB target
+    // without the gamma-space view it would come out near 188.
+    assert!(
+        near(pixel(&img, 16, 16), [128; 3], 2),
+        "inside the rectangle: {:?}",
+        pixel(&img, 16, 16)
+    );
+    let sky = RenderConfig::default()
+        .sky
+        .map(|c| (linear_to_srgb(c) * 255.0).round() as u8);
+    assert!(
+        near(pixel(&img, 48, 48), sky, 2),
+        "outside it, the scene shows"
     );
 }

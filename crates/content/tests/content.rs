@@ -195,3 +195,40 @@ fn texture_loading_reports_unreadable_packs() {
         Err(ContentError::Texture { .. })
     ));
 }
+
+#[test]
+fn base_pack_ships_a_readable_font() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packs/base");
+    let pack = Pack::read_dir(&dir).unwrap();
+    assert_eq!(pack.fonts, ["monogram-extended"]);
+    let bytes = pack.read_font("monogram-extended").unwrap();
+    // A TrueType file starts with this tag.
+    assert_eq!(&bytes[..4], &[0, 1, 0, 0]);
+}
+
+#[test]
+fn fonts_are_only_read_by_listed_name() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packs/base");
+    let pack = Pack::read_dir(&dir).unwrap();
+    for bad in [
+        "../pack",
+        "../../Cargo",
+        "missing",
+        "",
+        "fonts/monogram-extended",
+    ] {
+        assert!(
+            matches!(pack.read_font(bad), Err(ContentError::Invalid { .. })),
+            "{bad:?}"
+        );
+    }
+    let in_memory = pack_for_font_test();
+    assert!(matches!(
+        in_memory.read_font("x"),
+        Err(ContentError::Invalid { .. })
+    ));
+}
+
+fn pack_for_font_test() -> Pack {
+    pack("t", &[], &[]).unwrap()
+}

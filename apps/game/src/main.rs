@@ -2,6 +2,7 @@
 
 mod app;
 mod bench;
+mod overlay;
 mod stream;
 mod world;
 
@@ -54,6 +55,9 @@ enum Command {
         /// Save the last frame as a PNG.
         #[arg(long)]
         screenshot: Option<PathBuf>,
+        /// Draw the F3 overlay on the saved frame.
+        #[arg(long)]
+        overlay: bool,
     },
 }
 
@@ -67,6 +71,7 @@ fn main() -> Result<()> {
             height,
             speed,
             screenshot,
+            overlay,
         }) => bench::run(
             world,
             bench::BenchOptions {
@@ -75,6 +80,7 @@ fn main() -> Result<()> {
                 size: (width, height),
                 speed,
                 screenshot,
+                overlay,
             },
         ),
         None => app::run(

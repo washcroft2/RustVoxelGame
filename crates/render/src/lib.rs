@@ -15,5 +15,5 @@ mod texture;
 
 pub use camera::{Camera, Frustum};
 pub use error::RenderError;
-pub use renderer::{FrameStats, PresentPreference, RenderConfig, Renderer};
+pub use renderer::{FrameStats, Overlay, PresentPreference, RenderConfig, Renderer};
 pub use texture::mip_count;

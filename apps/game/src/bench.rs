@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use voxel_core::{BlockPos, DimensionId};
 use voxel_render::{Camera, RenderConfig, Renderer};
 
+use crate::overlay::{DebugInfo, DebugOverlay};
 use crate::stream::{StreamConfig, Streamer};
 use crate::world::World;
 
@@ -19,6 +20,8 @@ pub struct BenchOptions {
     /// Blocks per second the camera flies at.
     pub speed: f64,
     pub screenshot: Option<PathBuf>,
+    /// Draw the debug overlay on the screenshot.
+    pub overlay: bool,
 }
 
 fn percentile(sorted: &[f32], p: f32) -> f32 {
@@ -56,7 +59,7 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
     let tick = |streamer: &mut Streamer, renderer: &mut Renderer, camera: &Camera| -> Result<_> {
         let o = camera.block_origin();
         streamer.update(BlockPos::new(o[0], o[1], o[2]).chunk(), renderer);
-        let s = renderer.render(camera, DimensionId::OVERWORLD)?;
+        let s = renderer.render(camera, DimensionId::OVERWORLD, None)?;
         renderer.wait_idle();
         Ok(s)
     };
@@ -125,7 +128,32 @@ pub fn run(world: World, opts: BenchOptions) -> Result<()> {
     );
 
     if let Some(path) = opts.screenshot {
-        tick(&mut streamer, &mut renderer, &camera)?;
+        let o = camera.block_origin();
+        streamer.update(BlockPos::new(o[0], o[1], o[2]).chunk(), &mut renderer);
+        if opts.overlay {
+            let info = DebugInfo {
+                gpu: &renderer.gpu_description(),
+                frame_ms_median: percentile(&times, 0.5),
+                frame_ms_p99: percentile(&times, 0.99),
+                position: camera.position,
+                yaw: camera.yaw,
+                pitch: camera.pitch,
+                frame: last,
+                stream: streamer.stats(),
+                gpu_memory_bytes: renderer.gpu_memory_bytes(),
+                radius: opts.radius,
+            };
+            // egui sizes a new panel on its first frame and shows it from the second, and the
+            // font texture travels with the first. Every overlay must reach `render`, in order.
+            let mut overlay = DebugOverlay::new(world.font.clone());
+            for t in [0.0, 0.1] {
+                let mut o = overlay.frame(&info, opts.size, 1.0, t);
+                renderer.render(&camera, DimensionId::OVERWORLD, Some(&mut o))?;
+            }
+        } else {
+            renderer.render(&camera, DimensionId::OVERWORLD, None)?;
+        }
+        renderer.wait_idle();
         let pixels = renderer.read_pixels()?;
         let (w, h) = opts.size;
         image::RgbaImage::from_raw(w, h, pixels)
