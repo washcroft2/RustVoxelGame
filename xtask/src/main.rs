@@ -6,6 +6,7 @@ use std::process::{Command, ExitCode};
 use anyhow::{Context, Result, bail};
 
 mod bundle;
+mod rules;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -66,7 +67,8 @@ const VERIFY_STEPS: &[Step] = &[
     Step {
         name: "deny",
         program: "cargo",
-        args: &["deny", "check"],
+        // All features, so optional dependencies (the profiling build's Tracy) are checked too.
+        args: &["deny", "--all-features", "check"],
     },
 ];
 
@@ -121,13 +123,41 @@ fn verify() -> Result<()> {
             failed.push(step.name);
         }
     }
+    eprintln!("==> dependency rules: cargo metadata");
+    match dependency_rules() {
+        Ok(violations) if violations.is_empty() => {}
+        Ok(violations) => {
+            for v in &violations {
+                eprintln!("rule violated: {v}");
+            }
+            failed.push("dependency rules");
+        }
+        Err(e) => {
+            eprintln!("could not check dependency rules: {e:#}");
+            failed.push("dependency rules");
+        }
+    }
     if failed.is_empty() {
-        eprintln!("verify: all {} steps passed", VERIFY_STEPS.len());
-        eprintln!(
-            "verify: not yet implemented: crate dependency rules, short fuzz runs (no such crates exist yet)"
-        );
+        eprintln!("verify: all {} steps passed", VERIFY_STEPS.len() + 1);
+        eprintln!("verify: not yet implemented: short fuzz runs (no fuzz targets exist yet)");
         Ok(())
     } else {
         bail!("verify failed: {}", failed.join(", "))
     }
+}
+
+/// Checks the crate graph against the architecture rules (see `rules.rs`).
+fn dependency_rules() -> Result<Vec<rules::Violation>> {
+    let out = Command::new("cargo")
+        .args(["metadata", "--format-version", "1"])
+        .output()
+        .context("could not start `cargo metadata`")?;
+    if !out.status.success() {
+        bail!(
+            "`cargo metadata` failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let json = String::from_utf8(out.stdout).context("cargo metadata output is not UTF-8")?;
+    Ok(rules::parse(&json)?.check())
 }
